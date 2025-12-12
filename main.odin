@@ -992,7 +992,7 @@ create_texture_image :: proc() {
 	//import stbi "vendor:stb/image"  :::    pixels := stbi.load("textures/face.jpg", &width, &height, nil, 4)
 	if image, err := jpeg.load_from_file("textures/face.jpg", options={.alpha_add_if_missing}); err == nil { 
 		
-		image_size := vk.DeviceSize(image.width * image.height * 4)
+		image_size := vk.DeviceSize(image.width * image.height * image.channels)
 
 		staging_buffer: vk.Buffer
 		staging_buffer_memory: vk.DeviceMemory
@@ -1059,6 +1059,7 @@ end_single_time_commands ::proc(command_buffer: vk.CommandBuffer) {
 }
 
 create_image :: proc(width, height: u32, format: vk.Format, tiling: vk.ImageTiling, usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^vk.Image, image_memory: ^vk.DeviceMemory) {
+		
 	image_info := vk.ImageCreateInfo {
 		sType = .IMAGE_CREATE_INFO,
 		imageType = .D2,
