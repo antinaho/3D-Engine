@@ -78,18 +78,21 @@ App :: struct {
 
 	texture_image: vk.Image,
 	texture_image_memory: vk.DeviceMemory,
+	texture_image_view: vk.ImageView,
+	texture_sampler: vk.Sampler,
 }
 
 Vertex :: struct {
 	position: glsl.vec2,
 	color: glsl.vec3,
+	tex_coord: glsl.vec2
 }
 
 VERTICES := []Vertex {
-	{{-0.5, -0.5}, {1.0, 0.0, 0.0}},
-    {{0.5, -0.5}, {0.0, 1.0, 0.0}},
-    {{0.5, 0.5}, {0.0, 0.0, 1.0}},
-    {{-0.5, 0.5}, {1.0, 1.0, 1.0}}
+	{{-0.5, -0.5}, {1.0, 0.0, 0.0}, {1.0, 0.0}},
+    {{0.5, -0.5}, {0.0, 1.0, 0.0}, {0.0, 0.0}},
+    {{0.5, 0.5}, {0.0, 0.0, 1.0}, {0.0, 1.0}},
+    {{-0.5, 0.5}, {1.0, 1.0, 1.0}, {1.0, 1.0}}
 }
 
 INDICES := []u32 {
@@ -113,8 +116,8 @@ get_vertex_binding_description :: proc() -> vk.VertexInputBindingDescription {
 	return binding_description
 }
 
-get_vertex_attribute_description :: proc() -> []vk.VertexInputAttributeDescription {
-	attribute_descriptions := make([]vk.VertexInputAttributeDescription, 2)
+get_vertex_attribute_description :: proc() -> [3]vk.VertexInputAttributeDescription {
+	attribute_descriptions := [3]vk.VertexInputAttributeDescription {}
 
 	attribute_descriptions[0].binding = 0
 	attribute_descriptions[0].location = 0
@@ -125,6 +128,11 @@ get_vertex_attribute_description :: proc() -> []vk.VertexInputAttributeDescripti
 	attribute_descriptions[1].location = 1;
 	attribute_descriptions[1].format = .R32G32B32_SFLOAT
 	attribute_descriptions[1].offset = cast(u32)offset_of(Vertex, color);
+
+	attribute_descriptions[2].binding = 0;
+	attribute_descriptions[2].location = 2;
+	attribute_descriptions[2].format = .R32G32_SFLOAT
+	attribute_descriptions[2].offset = cast(u32)offset_of(Vertex, tex_coord);
 
 	return attribute_descriptions
 }
@@ -413,6 +421,7 @@ create_logical_device :: proc() {
 	}
 
 	device_features: vk.PhysicalDeviceFeatures
+	device_features.samplerAnisotropy = true
 
 	create_info: vk.DeviceCreateInfo = {
 		sType = .DEVICE_CREATE_INFO,
@@ -539,16 +548,8 @@ create_swapchain :: proc() {
 create_image_views :: proc() {
 
 	for image, i in app.swapchain_images {
-		create_info: vk.ImageViewCreateInfo = {
-			sType = .IMAGE_VIEW_CREATE_INFO,
-			image = image,
-			viewType = .D2,
-			format = app.swapchain_format.format,
-			components = vk.ComponentMapping{.IDENTITY, .IDENTITY, .IDENTITY, .IDENTITY},
-			subresourceRange = {aspectMask = {.COLOR}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 0, layerCount = 1},
-		}
 
-		assert_success(vk.CreateImageView(app.device, &create_info, nil, &app.swapchain_views[i]))
+		app.swapchain_views[i] = create_image_view(app.swapchain_images[i], app.swapchain_format.format)
 	}
 }
 
@@ -704,7 +705,7 @@ create_command_buffers :: proc() {
 		commandBufferCount = MAX_FRAMES_IN_FLIGHT,
 	}
 
-	assert_success(vk.AllocateCommandBuffers(app.device, &allocate_info, &app.command_buffers[0]))
+	assert_success(vk.AllocateCommandBuffers(app.device, &allocate_info, raw_data(app.command_buffers[:])))
 }
 
 create_command_pool :: proc() {
@@ -816,6 +817,13 @@ when ODIN_OS == .Darwin {
 cleanup :: proc() {
 	cleanup_swapchain()
 
+	vk.DestroySampler(app.device, app.texture_sampler, nil)
+
+	vk.DestroyImageView(app.device, app.texture_image_view, nil)
+
+	vk.DestroyImage(app.device, app.texture_image, nil)
+	vk.FreeMemory(app.device, app.texture_image_memory, nil)
+
 	for i in 0..<MAX_FRAMES_IN_FLIGHT {
 		vk.DestroyBuffer(app.device, app.uniform_buffers[i], nil)
 		vk.FreeMemory(app.device, app.uniform_buffers_memory[i], nil)
@@ -886,6 +894,8 @@ when ODIN_DEBUG {
 	create_command_pool()
 
 	create_texture_image()
+	create_texture_image_view()
+	create_texture_sampler()
 
 	create_vertex_buffer()
 	create_index_buffer()
@@ -909,38 +919,150 @@ when ODIN_DEBUG {
 	log.destroy_console_logger(context.logger)
 }
 
-TEX :: #load("textures/IMG.jpg")
+
+
+create_texture_sampler :: proc() {
+	sampler_info := vk.SamplerCreateInfo {
+		sType = .SAMPLER_CREATE_INFO,
+		magFilter = .LINEAR,
+		minFilter = .LINEAR,
+
+		addressModeU = .REPEAT,
+		addressModeV = .REPEAT,
+		addressModeW = .REPEAT,
+
+		borderColor = .INT_OPAQUE_BLACK,
+		unnormalizedCoordinates = false,
+		
+		compareEnable = false,
+		compareOp = .ALWAYS,
+
+		mipmapMode = .LINEAR,
+		mipLodBias = 0,
+		minLod = 0,
+		maxLod = 0,
+	}
+
+	props: vk.PhysicalDeviceProperties
+	vk.GetPhysicalDeviceProperties(app.physical_device, &props)
+
+	features: vk.PhysicalDeviceFeatures
+	vk.GetPhysicalDeviceFeatures(app.physical_device, &features)
+	
+	if features.samplerAnisotropy {
+		sampler_info.anisotropyEnable = true
+		sampler_info.maxAnisotropy = props.limits.maxSamplerAnisotropy
+	} else {
+		sampler_info.anisotropyEnable = false
+		sampler_info.maxAnisotropy = 1.0
+	}
+
+	assert_success(vk.CreateSampler(app.device, &sampler_info, nil, &app.texture_sampler))
+}
+
+create_texture_image_view :: proc() {
+	app.texture_image_view = create_image_view(app.texture_image, .R8G8B8A8_SRGB)
+}
+
+create_image_view :: proc(image: vk.Image, format: vk.Format) -> (view: vk.ImageView) {
+
+	create_info := vk.ImageViewCreateInfo {
+		sType = .IMAGE_VIEW_CREATE_INFO,
+		image = image,
+		viewType = .D2,
+		format = format,
+		subresourceRange = vk.ImageSubresourceRange {
+			aspectMask = {.COLOR},
+			baseMipLevel = 0,
+			levelCount = 1,
+			baseArrayLayer = 0,
+			layerCount = 1,
+		}
+	}
+
+	assert_success(vk.CreateImageView(app.device, &create_info, nil, &view))
+
+	return view
+}
+
 
 import "core:image/jpeg"
-import "core:image"
-create_texture_image :: proc() {
 
-	if pixels, err := jpeg.load_from_bytes(TEX, allocator=context.temp_allocator); err == nil {
-		size := vk.DeviceSize(pixels.width * pixels.height * 4)
+create_texture_image :: proc() {
+	//import stbi "vendor:stb/image"  :::    pixels := stbi.load("textures/face.jpg", &width, &height, nil, 4)
+	if image, err := jpeg.load_from_file("textures/face.jpg", options={.alpha_add_if_missing}); err == nil { 
+		
+		image_size := vk.DeviceSize(image.width * image.height * 4)
 
 		staging_buffer: vk.Buffer
 		staging_buffer_memory: vk.DeviceMemory
 
-		create_buffer(size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging_buffer, &staging_buffer_memory)
+		create_buffer(image_size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging_buffer, &staging_buffer_memory)
 
 		data: rawptr
-		vk.MapMemory(app.device, staging_buffer_memory, 0, size, {}, &data)
-		mem.copy(data, pixels, int(size))
+		vk.MapMemory(app.device, staging_buffer_memory, 0, image_size, {}, &data)
+		mem.copy(data, &image.pixels.buf[0], int(image_size))
 		vk.UnmapMemory(app.device, staging_buffer_memory)
 
-		create_image(u32(pixels.width), u32(pixels.height), .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &app.texture_image, &app.texture_image_memory)
+		create_image(u32(image.width), u32(image.height), .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &app.texture_image, &app.texture_image_memory)
 
+		transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+		copy_buffer_to_image(staging_buffer, app.texture_image, u32(image.width), u32(image.height))
+		transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
 
+		vk.DestroyBuffer(app.device, staging_buffer, nil)
+		vk.FreeMemory(app.device, staging_buffer_memory, nil)
+	} else {
+		log.panicf("Image load error: %v", err)
 	}
 }
 
+begin_single_time_commands :: proc() -> vk.CommandBuffer {
+	
+	alloc_info := vk.CommandBufferAllocateInfo {
+		sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+		level = .PRIMARY,
+		commandPool = app.command_pool,
+		commandBufferCount = 1,
+	}
 
+	command_buffer: vk.CommandBuffer
+	assert_success(vk.AllocateCommandBuffers(app.device, &alloc_info, &command_buffer))
+
+	begin_info := vk.CommandBufferBeginInfo {
+		sType = .COMMAND_BUFFER_BEGIN_INFO,
+		flags = {.ONE_TIME_SUBMIT},
+	}
+
+	assert_success(vk.BeginCommandBuffer(command_buffer, &begin_info))
+
+	return command_buffer
+}
+
+end_single_time_commands ::proc(command_buffer: vk.CommandBuffer) {
+
+	assert_success(vk.EndCommandBuffer(command_buffer))
+
+	cmds := [1]vk.CommandBuffer{command_buffer}
+	submit_info := vk.SubmitInfo {
+		sType = .SUBMIT_INFO,
+		pNext = nil,
+		commandBufferCount = 1,
+		pCommandBuffers = &cmds[0],
+	}
+	
+	assert_success(vk.QueueSubmit(app.graphics_queue, 1, &submit_info, 0))
+
+	assert_success(vk.QueueWaitIdle(app.graphics_queue))
+
+	vk.FreeCommandBuffers(app.device, app.command_pool, 1, &cmds[0])
+}
 
 create_image :: proc(width, height: u32, format: vk.Format, tiling: vk.ImageTiling, usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^vk.Image, image_memory: ^vk.DeviceMemory) {
 	image_info := vk.ImageCreateInfo {
 		sType = .IMAGE_CREATE_INFO,
 		imageType = .D2,
-		extent = {
+		extent = vk.Extent3D {
 			width = width,
 			height = height,
 			depth = 1,
@@ -963,24 +1085,26 @@ create_image :: proc(width, height: u32, format: vk.Format, tiling: vk.ImageTili
 
 	alloc_info := vk.MemoryAllocateInfo {
 		sType = .MEMORY_ALLOCATE_INFO,
-		allocationSize = size_of(mem_reqs),
+		allocationSize = mem_reqs.size,
 		memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits, properties)
 	}
 
 	assert_success(vk.AllocateMemory(app.device, &alloc_info, nil, image_memory))
 
-	vk.BindImageMemory(app.device, image^, image_memory^, 0)
+	assert_success(vk.BindImageMemory(app.device, image^, image_memory^, 0))
 }
 
 create_descriptor_sets :: proc() {
 
-	// 	layouts := []vk.DescriptorSetLayout { MAX_FRAMES_IN_FLIGHT, app.descriptor_set_layout}
-	layouts := []vk.DescriptorSetLayout { app.descriptor_set_layout, app.descriptor_set_layout}
+	layouts := [2]vk.DescriptorSetLayout { 
+		app.descriptor_set_layout,
+		app.descriptor_set_layout
+	}
 
 	alloc_info := vk.DescriptorSetAllocateInfo {
 		sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
 		descriptorPool = app.descriptor_pool,
-		pSetLayouts = raw_data(layouts),
+		pSetLayouts = raw_data(layouts[:]),
 		descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
 	}
 
@@ -993,35 +1117,56 @@ create_descriptor_sets :: proc() {
 			range = size_of(UniformBufferObject),
 		}
 
-		descriptor_write := vk.WriteDescriptorSet {
-			sType = .WRITE_DESCRIPTOR_SET,
-			descriptorCount = 1,
-			descriptorType = .UNIFORM_BUFFER,
-			dstSet = app.descriptor_sets[i],
-			dstBinding = 0,
-			dstArrayElement = 0,
-			pBufferInfo = &buffer_info,
-			pImageInfo = nil,
-			pTexelBufferView = nil,
+		image_info := vk.DescriptorImageInfo {
+			imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+			imageView = app.texture_image_view,
+			sampler = app.texture_sampler,
 		}
 
-		vk.UpdateDescriptorSets(app.device, 1, &descriptor_write, 0, nil)
+		descriptor_writes := [2]vk.WriteDescriptorSet {
+				vk.WriteDescriptorSet {
+				sType = .WRITE_DESCRIPTOR_SET,
+				dstSet = app.descriptor_sets[i],
+				dstBinding = 0,
+				dstArrayElement = 0,
+				descriptorCount = 1,
+				descriptorType = .UNIFORM_BUFFER,
+				pBufferInfo = &buffer_info,
+			},
+				vk.WriteDescriptorSet {
+				sType = .WRITE_DESCRIPTOR_SET,
+				dstSet = app.descriptor_sets[i],
+				dstBinding = 1,
+				dstArrayElement = 0,
+				descriptorCount = 1,
+				descriptorType = .COMBINED_IMAGE_SAMPLER,
+				pImageInfo = &image_info
+			}
+		}
+
+		vk.UpdateDescriptorSets(app.device, len(descriptor_writes), raw_data(descriptor_writes[:]), 0, nil)
 	}
 
 }
 
 create_descriptor_pool :: proc() {
-	pool_size := vk.DescriptorPoolSize {
-		descriptorCount = MAX_FRAMES_IN_FLIGHT,
-		type = .UNIFORM_BUFFER,
+
+	pool_sizes := [2]vk.DescriptorPoolSize {
+		{
+			type = .UNIFORM_BUFFER, 
+			descriptorCount = MAX_FRAMES_IN_FLIGHT
+		},
+		{
+			type = .COMBINED_IMAGE_SAMPLER, 
+			descriptorCount = MAX_FRAMES_IN_FLIGHT
+		}
 	}
 
 	pool_info := vk.DescriptorPoolCreateInfo {
 		sType = .DESCRIPTOR_POOL_CREATE_INFO,
-		poolSizeCount = 1,
-		pPoolSizes = &pool_size,
+		poolSizeCount = len(pool_sizes),
+		pPoolSizes = raw_data(pool_sizes[:]),
 		maxSets = MAX_FRAMES_IN_FLIGHT,
-
 	}
 
 	assert_success(vk.CreateDescriptorPool(app.device, &pool_info, nil, &app.descriptor_pool))
@@ -1037,8 +1182,6 @@ create_uniform_buffer :: proc() {
 		assert_success(vk.MapMemory(app.device, app.uniform_buffers_memory[i], 0, buffer_size, {}, &app.uniform_buffers_mapped[i]))
 
 	}
-
-
 }
 
 create_descriptor_set_layout :: proc() {
@@ -1050,10 +1193,23 @@ create_descriptor_set_layout :: proc() {
 		pImmutableSamplers = nil,
 	}
 
+	sampler_layout_binding := vk.DescriptorSetLayoutBinding {
+		binding = 1,
+		descriptorCount = 1,
+		descriptorType = .COMBINED_IMAGE_SAMPLER,
+		pImmutableSamplers = nil,
+		stageFlags = {.FRAGMENT},
+	}
+
+	bindings := [2]vk.DescriptorSetLayoutBinding {
+		ubo_layout_binding,
+		sampler_layout_binding,
+	}
+
 	create_info := vk.DescriptorSetLayoutCreateInfo {
 		sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		bindingCount = 1,
-		pBindings = &ubo_layout_binding,
+		bindingCount = len(bindings),
+		pBindings = raw_data(bindings[:]),
 	}
 
 	assert_success(vk.CreateDescriptorSetLayout(app.device, &create_info, nil, &app.descriptor_set_layout))
@@ -1100,44 +1256,124 @@ create_vertex_buffer :: proc() {
 	vk.FreeMemory(app.device, staging_buffer_memory, nil)
 }
 
+transition_image_layout :: proc(image: vk.Image, format: vk.Format, layout_old: vk.ImageLayout, layout_new: vk.ImageLayout) {
+	command_buffer := begin_single_time_commands()
+
+	barrier := vk.ImageMemoryBarrier {
+		sType = .IMAGE_MEMORY_BARRIER,
+		oldLayout = layout_old,
+		newLayout = layout_new,
+		srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+		dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+		image = image,
+		subresourceRange = vk.ImageSubresourceRange {
+			aspectMask = {.COLOR},
+			baseMipLevel = 0,
+			levelCount = 1,
+			baseArrayLayer = 0,
+			layerCount = 1,
+		},
+		srcAccessMask = {},
+		dstAccessMask = {},
+	}
+
+	source_stage: vk.PipelineStageFlags
+	destination_stage: vk.PipelineStageFlags
+
+	if layout_old == .UNDEFINED && layout_new == .TRANSFER_DST_OPTIMAL {
+		barrier.srcAccessMask = {}
+		barrier.dstAccessMask = {.TRANSFER_WRITE}
+		
+		source_stage = {.TOP_OF_PIPE}
+		destination_stage = {.TRANSFER}
+	} else if layout_old == .TRANSFER_DST_OPTIMAL && layout_new == .SHADER_READ_ONLY_OPTIMAL {
+		barrier.srcAccessMask = {.TRANSFER_WRITE}
+		barrier.dstAccessMask = {.SHADER_READ}
+
+		source_stage = {.TRANSFER}
+		destination_stage = {.FRAGMENT_SHADER}
+	} else {
+		log.panic("Unsupported layout transition")
+	}
+
+	vk.CmdPipelineBarrier(command_buffer, source_stage, destination_stage, {}, 0, nil, 0, nil, 1, &barrier)
+
+	end_single_time_commands(command_buffer)
+}
+
+copy_buffer_to_image :: proc(buffer: vk.Buffer, image: vk.Image, width, height: u32) {
+	command_buffer := begin_single_time_commands()
+
+	region := vk.BufferImageCopy {
+		bufferOffset = 0,
+		bufferRowLength = 0,
+		bufferImageHeight = 0,
+
+		imageSubresource = vk.ImageSubresourceLayers {
+			aspectMask = {.COLOR},
+			mipLevel = 0,
+			baseArrayLayer = 0,
+			layerCount = 1,
+		},
+
+		imageOffset = vk.Offset3D {0, 0, 0},
+		imageExtent = vk.Extent3D {
+			width = width,
+			height = height,
+			depth = 1
+		}
+	}
+
+	vk.CmdCopyBufferToImage(command_buffer, buffer, image, .TRANSFER_DST_OPTIMAL, 1, &region)
+
+	end_single_time_commands(command_buffer)
+}
+
 copy_buffer :: proc(src, dst: vk.Buffer, size: vk.DeviceSize) {
-	alloc_info := vk.CommandBufferAllocateInfo {
-		sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-		level = .PRIMARY,
-		commandPool = app.command_pool,
-		commandBufferCount = 1
-	}
-
-	command_buffer: vk.CommandBuffer
-	assert_success(vk.AllocateCommandBuffers(app.device, &alloc_info, &command_buffer))
-
-	begin_info := vk.CommandBufferBeginInfo {
-		sType = .COMMAND_BUFFER_BEGIN_INFO,
-		flags = {.ONE_TIME_SUBMIT}
-	}
-
-	assert_success(vk.BeginCommandBuffer(command_buffer, &begin_info))
+	command_buffer := begin_single_time_commands()
 
 	copy_region := vk.BufferCopy {
-		srcOffset = 0,
-		dstOffset = 0,
 		size = size,
 	}
-
+	
 	vk.CmdCopyBuffer(command_buffer, src, dst, 1, &copy_region)
 
-	vk.EndCommandBuffer(command_buffer)
+	end_single_time_commands(command_buffer)
 
-	submit_info := vk.SubmitInfo {
-		sType = .SUBMIT_INFO,
-		commandBufferCount = 1,
-		pCommandBuffers = &command_buffer,
-	}
 
-	vk.QueueSubmit(app.graphics_queue, 1, &submit_info, 0)
-	vk.QueueWaitIdle(app.graphics_queue)
+	// alloc_info := vk.CommandBufferAllocateInfo {
+	// 	sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+	// 	level = .PRIMARY,
+	// 	commandPool = app.command_pool,
+	// 	commandBufferCount = 1
+	// }
 
-	vk.FreeCommandBuffers(app.device, app.command_pool, 1, &command_buffer)
+	// command_buffer: vk.CommandBuffer
+	// assert_success(vk.AllocateCommandBuffers(app.device, &alloc_info, &command_buffer))
+
+	// begin_info := vk.CommandBufferBeginInfo {
+	// 	sType = .COMMAND_BUFFER_BEGIN_INFO,
+	// 	flags = {.ONE_TIME_SUBMIT}
+	// }
+
+	// assert_success(vk.BeginCommandBuffer(command_buffer, &begin_info))
+
+	
+
+	// vk.CmdCopyBuffer(command_buffer, src, dst, 1, &copy_region)
+
+	// vk.EndCommandBuffer(command_buffer)
+
+	// submit_info := vk.SubmitInfo {
+	// 	sType = .SUBMIT_INFO,
+	// 	commandBufferCount = 1,
+	// 	pCommandBuffers = &command_buffer,
+	// }
+
+	// vk.QueueSubmit(app.graphics_queue, 1, &submit_info, 0)
+	// vk.QueueWaitIdle(app.graphics_queue)
+
+	// vk.FreeCommandBuffers(app.device, app.command_pool, 1, &command_buffer)
 }
 
 create_buffer :: proc(size: vk.DeviceSize, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags, buffer: ^vk.Buffer, buffer_memory: ^vk.DeviceMemory) {
@@ -1397,7 +1633,7 @@ create_graphics_pipeline :: proc() {
 		vertexAttributeDescriptionCount = cast(u32)len(attribute_description),
 
 		pVertexBindingDescriptions = &binding_description,
-		pVertexAttributeDescriptions = raw_data(attribute_description),
+		pVertexAttributeDescriptions = &attribute_description[0],
 	}
 
 	input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
