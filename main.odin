@@ -15,7 +15,6 @@ import "core:math/linalg/glsl"
 
 vert_shader_code :: #load("shaders/vert.spv")
 frag_shader_code :: #load("shaders/frag.spv")
-texture :: #load("textures/IMG.jpg")
 
 app: ^App
 MAX_FRAMES_IN_FLIGHT :: 2
@@ -76,9 +75,6 @@ App :: struct {
 
 	descriptor_pool: vk.DescriptorPool,
 	descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-
-	texture_image: vk.Image,
-	texture_image_memory: vk.DeviceMemory,
 }
 
 Vertex :: struct {
@@ -885,7 +881,9 @@ when ODIN_DEBUG {
 	create_graphics_pipeline()
 	create_frame_buffers()
 	create_command_pool()
+
 	create_texture_image()
+
 	create_vertex_buffer()
 	create_index_buffer()
 	create_uniform_buffer()
@@ -908,108 +906,8 @@ when ODIN_DEBUG {
 	log.destroy_console_logger(context.logger)
 }
 
-import "core:image/jpeg"
-import "core:image"
-
-
-create_image :: proc(width, height: u32, format: vk.Format, tiling: vk.ImageTiling, usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^vk.Image, image_memory: ^vk.DeviceMemory) {
-
-	image_info := vk.ImageCreateInfo {
-		sType = .IMAGE_CREATE_INFO,
-		imageType = .D2,
-		extent = {
-			width = width,
-			height = height,
-			depth = 1,
-		},
-		mipLevels = 1,
-		arrayLayers = 1,
-		format = format,
-		tiling = tiling,
-		initialLayout = .UNDEFINED,
-		usage = usage,
-		sharingMode = .EXCLUSIVE,
-		samples = {._1},
-		flags = nil,
-	}
-
-	assert_success(vk.CreateImage(app.device, &image_info, nil, image))
-
-	mem_reqs: vk.MemoryRequirements
-	vk.GetImageMemoryRequirements(app.device, image^, &mem_reqs)
-
-	alloc_info := vk.MemoryAllocateInfo {
-		sType = .MEMORY_ALLOCATE_INFO,
-		allocationSize = size_of(mem_reqs),
-		memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits, properties)
-	}
-
-	assert_success(vk.AllocateMemory(app.device, &alloc_info, nil, image_memory))
-
-
-	assert_success(vk.BindImageMemory(app.device, image^, image_memory^, 0))
-}
-
-
-begin_single_time_commands :: proc() -> vk.CommandBuffer {
-	alloc_info := vk.CommandBufferAllocateInfo {
-		sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-		level = .PRIMARY,
-		commandBufferCount = 1,
-		commandPool = app.command_pool,
-	}
-
-	command_buffer: vk.CommandBuffer
-	assert_success(vk.AllocateCommandBuffers(app.device, &alloc_info, &command_buffer))
-
-	begin_info := vk.CommandBufferBeginInfo {
-		sType = .COMMAND_BUFFER_BEGIN_INFO,
-		flags = {.ONE_TIME_SUBMIT},
-	}
-
-	assert_success(vk.BeginCommandBuffer(command_buffer, &begin_info))
-
-	return command_buffer
-}
-
-end_single_time_commands :: proc(buffer: ^vk.CommandBuffer) {
-
-	vk.EndCommandBuffer(buffer^)
-
-	submit_info := vk.SubmitInfo {
-		sType = .SUBMIT_INFO,
-		commandBufferCount = 1,
-		pCommandBuffers = buffer,
-	}
-
-	vk.QueueSubmit(app.graphics_queue, 1, &submit_info, 0)
-	vk.QueueWaitIdle(app.graphics_queue)
-
-	vk.FreeCommandBuffers(app.device, app.command_pool, 1, buffer)
-}
-
 create_texture_image :: proc() {
-	if img, err := jpeg.load_from_bytes(texture, allocator=context.temp_allocator); err == nil {
-		image_size := vk.DeviceSize(img.width * img.height * 4)
-		
-		staging_buffer: vk.Buffer
-		staging_buffer_memory: vk.DeviceMemory
-
-		create_buffer(image_size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging_buffer, &staging_buffer_memory)
-
-		data: rawptr
-		vk.MapMemory(app.device, staging_buffer_memory, 0, image_size, {}, &data)
-		mem.copy(data, img, int(image_size))
-		vk.UnmapMemory(app.device, staging_buffer_memory)
-
-		create_image(u32(img.width), u32(img.height), .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_SRC, .SAMPLED}, {.DEVICE_LOCAL}, &app.texture_image, &app.texture_image_memory)
-
-		// transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
-
-		// copy_buffer_image(staging_buffer, app.texture_image, u32(img.width), u32(img.height))
-
-		// transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
-	}
+	
 }
 
 create_descriptor_sets :: proc() {
@@ -1140,34 +1038,23 @@ create_vertex_buffer :: proc() {
 	vk.FreeMemory(app.device, staging_buffer_memory, nil)
 }
 
-copy_buffer_image :: proc(buffer: vk.Buffer, image: vk.Image, width, height: u32) {
-	command_buffer := begin_single_time_commands()
-
-	region := vk.BufferImageCopy {
-		bufferOffset = 0,
-		bufferRowLength = 0,
-		bufferImageHeight = 0,
-
-		imageSubresource = {
-			aspectMask = {.COLOR},
-			mipLevel = 0,
-			baseArrayLayer = 0,
-			layerCount = 1,
-		},
-		imageOffset = {0, 0, 0},
-		imageExtent = {
-			width, height, 1
-		}
+copy_buffer :: proc(src, dst: vk.Buffer, size: vk.DeviceSize) {
+	alloc_info := vk.CommandBufferAllocateInfo {
+		sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+		level = .PRIMARY,
+		commandPool = app.command_pool,
+		commandBufferCount = 1
 	}
 
-	vk.CmdCopyBufferToImage(command_buffer, buffer, image, .TRANSFER_DST_OPTIMAL, 1, &region);
+	command_buffer: vk.CommandBuffer
+	assert_success(vk.AllocateCommandBuffers(app.device, &alloc_info, &command_buffer))
 
+	begin_info := vk.CommandBufferBeginInfo {
+		sType = .COMMAND_BUFFER_BEGIN_INFO,
+		flags = {.ONE_TIME_SUBMIT}
+	}
 
-	end_single_time_commands(&command_buffer)
-}
-
-copy_buffer :: proc(src, dst: vk.Buffer, size: vk.DeviceSize) {
-	buffer := begin_single_time_commands()
+	assert_success(vk.BeginCommandBuffer(command_buffer, &begin_info))
 
 	copy_region := vk.BufferCopy {
 		srcOffset = 0,
@@ -1175,35 +1062,20 @@ copy_buffer :: proc(src, dst: vk.Buffer, size: vk.DeviceSize) {
 		size = size,
 	}
 
-	vk.CmdCopyBuffer(buffer, src, dst, 1, &copy_region)
+	vk.CmdCopyBuffer(command_buffer, src, dst, 1, &copy_region)
 
-	end_single_time_commands(&buffer)
-}
+	vk.EndCommandBuffer(command_buffer)
 
-transition_image_layout :: proc(image: vk.Image, format: vk.Format, oldLayout: vk.ImageLayout, newLayout: vk.ImageLayout) {
-	buffer := begin_single_time_commands()
-
-	barrier := vk.ImageMemoryBarrier {
-		sType = .IMAGE_MEMORY_BARRIER,
-		oldLayout = oldLayout,
-		newLayout = newLayout,
-		srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-		dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-		image = image,
-		subresourceRange = {
-			aspectMask = {.COLOR},
-			baseMipLevel = 0,
-			levelCount = 1,
-			baseArrayLayer = 0,
-			layerCount = 1,
-		},
-		srcAccessMask = {},
-		dstAccessMask = {},
+	submit_info := vk.SubmitInfo {
+		sType = .SUBMIT_INFO,
+		commandBufferCount = 1,
+		pCommandBuffers = &command_buffer,
 	}
 
-	vk.CmdPipelineBarrier(buffer, {}, {}, {}, 0, nil, 0, nil, 1, &barrier)
+	vk.QueueSubmit(app.graphics_queue, 1, &submit_info, 0)
+	vk.QueueWaitIdle(app.graphics_queue)
 
-	end_single_time_commands(&buffer)
+	vk.FreeCommandBuffers(app.device, app.command_pool, 1, &command_buffer)
 }
 
 create_buffer :: proc(size: vk.DeviceSize, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags, buffer: ^vk.Buffer, buffer_memory: ^vk.DeviceMemory) {
