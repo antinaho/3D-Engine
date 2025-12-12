@@ -75,6 +75,9 @@ App :: struct {
 
 	descriptor_pool: vk.DescriptorPool,
 	descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+
+	texture_image: vk.Image,
+	texture_image_memory: vk.DeviceMemory,
 }
 
 Vertex :: struct {
@@ -906,8 +909,67 @@ when ODIN_DEBUG {
 	log.destroy_console_logger(context.logger)
 }
 
+TEX :: #load("textures/IMG.jpg")
+
+import "core:image/jpeg"
+import "core:image"
 create_texture_image :: proc() {
-	
+
+	if pixels, err := jpeg.load_from_bytes(TEX, allocator=context.temp_allocator); err == nil {
+		size := vk.DeviceSize(pixels.width * pixels.height * 4)
+
+		staging_buffer: vk.Buffer
+		staging_buffer_memory: vk.DeviceMemory
+
+		create_buffer(size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging_buffer, &staging_buffer_memory)
+
+		data: rawptr
+		vk.MapMemory(app.device, staging_buffer_memory, 0, size, {}, &data)
+		mem.copy(data, pixels, int(size))
+		vk.UnmapMemory(app.device, staging_buffer_memory)
+
+		create_image(u32(pixels.width), u32(pixels.height), .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &app.texture_image, &app.texture_image_memory)
+
+
+	}
+}
+
+
+
+create_image :: proc(width, height: u32, format: vk.Format, tiling: vk.ImageTiling, usage: vk.ImageUsageFlags, properties: vk.MemoryPropertyFlags, image: ^vk.Image, image_memory: ^vk.DeviceMemory) {
+	image_info := vk.ImageCreateInfo {
+		sType = .IMAGE_CREATE_INFO,
+		imageType = .D2,
+		extent = {
+			width = width,
+			height = height,
+			depth = 1,
+		},
+		mipLevels = 1,
+		arrayLayers = 1,
+		format = format,
+		tiling = tiling,
+		initialLayout = .UNDEFINED,
+		usage = usage,
+		sharingMode = .EXCLUSIVE,
+		samples = {._1},
+		flags = nil,
+	}
+
+	assert_success(vk.CreateImage(app.device, &image_info, nil, image))
+
+	mem_reqs: vk.MemoryRequirements
+	vk.GetImageMemoryRequirements(app.device, image^, &mem_reqs)
+
+	alloc_info := vk.MemoryAllocateInfo {
+		sType = .MEMORY_ALLOCATE_INFO,
+		allocationSize = size_of(mem_reqs),
+		memoryTypeIndex = find_memory_type(mem_reqs.memoryTypeBits, properties)
+	}
+
+	assert_success(vk.AllocateMemory(app.device, &alloc_info, nil, image_memory))
+
+	vk.BindImageMemory(app.device, image^, image_memory^, 0)
 }
 
 create_descriptor_sets :: proc() {
