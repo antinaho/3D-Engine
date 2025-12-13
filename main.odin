@@ -7,11 +7,11 @@ import "core:fmt"
 import vk "vendor:vulkan"
 import "vendor:glfw"
 import "core:slice"
-import "core:os"
 import "core:c"
 import "core:log"
-import "core:math/linalg"
 import "core:math/linalg/glsl"
+
+_ :: fmt
 
 vert_shader_code :: #load("shaders/vert.spv")
 frag_shader_code :: #load("shaders/frag.spv")
@@ -96,23 +96,27 @@ Vertex :: struct {
 	tex_coord: glsl.vec2
 }
 
-VERTICES := []Vertex {
-	{{-0.5, -0.5, 0.0}, {1.0, 0.0, 0.0}, {0.0, 0.0}},
-    {{0.5, -0.5, 0.0}, {0.0, 1.0, 0.0}, {1.0, 0.0}},
-    {{0.5, 0.5, 0.0}, {0.0, 0.0, 1.0}, {1.0, 1.0}},
-    {{-0.5, 0.5, 0.0}, {1.0, 1.0, 1.0}, {0.0, 1.0}},
 
-	{{-0.5, -0.5, -0.5}, {1.0, 0.0, 0.0}, {0.0, 0.0}},
-    {{0.5, -0.5, -0.5}, {0.0, 1.0, 0.0}, {1.0, 0.0}},
-    {{0.5, 0.5, -0.5}, {0.0, 0.0, 1.0}, {1.0, 1.0}},
-    {{-0.5, 0.5, -0.5}, {1.0, 1.0, 1.0}, {0.0, 1.0}}
-}
+// VERTICES := model_verts
+// INDICES := model_indices
 
-INDICES := []u32 {
-	0, 1, 2, 2, 3, 0,
+// VERTICES := []Vertex {
+// 	{{-0.5, -0.5, 0.0}, {1.0, 0.0, 0.0}, {0.0, 0.0}},
+//     {{0.5, -0.5, 0.0}, {0.0, 1.0, 0.0}, {1.0, 0.0}},
+//     {{0.5, 0.5, 0.0}, {0.0, 0.0, 1.0}, {1.0, 1.0}},
+//     {{-0.5, 0.5, 0.0}, {1.0, 1.0, 1.0}, {0.0, 1.0}},
 
-	4, 5, 6, 6, 7, 4
-}
+// 	{{-0.5, -0.5, -0.5}, {1.0, 0.0, 0.0}, {0.0, 0.0}},
+//     {{0.5, -0.5, -0.5}, {0.0, 1.0, 0.0}, {1.0, 0.0}},
+//     {{0.5, 0.5, -0.5}, {0.0, 0.0, 1.0}, {1.0, 1.0}},
+//     {{-0.5, 0.5, -0.5}, {1.0, 1.0, 1.0}, {0.0, 1.0}}
+// }
+
+// INDICES := []u32 {
+// 	0, 1, 2, 2, 3, 0,
+
+// 	4, 5, 6, 6, 7, 4
+// }
 
 UniformBufferObject :: struct #align(16) {
 	model: glsl.mat4,
@@ -713,7 +717,8 @@ record_command_buffer :: proc(command_buffer: vk.CommandBuffer, index: u32) {
 
 	vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, app.pipeline_layout, 0, 1, &app.descriptor_sets[app.current_frame], 0, nil)
 
-	vk.CmdDrawIndexed(command_buffer, cast(u32)len(INDICES), 1, 0, 0, 0)
+	//vk.CmdDrawIndexed(command_buffer, cast(u32)len(INDICES), 1, 0, 0, 0)
+	vk.CmdDrawIndexed(command_buffer, cast(u32)len(model_indices), 1, 0, 0, 0)
 
 	vk.CmdEndRenderPass(command_buffer)
 
@@ -920,6 +925,8 @@ when ODIN_DEBUG {
 	create_texture_image_view()
 	create_texture_sampler()
 
+	load_model()
+
 	create_vertex_buffer()
 	create_index_buffer()
 	create_uniform_buffer()
@@ -940,6 +947,32 @@ when ODIN_DEBUG {
 	vk.DeviceWaitIdle(app.device)
 
 	log.destroy_console_logger(context.logger)
+}
+
+load_model :: proc() {
+
+	model, err := read_model_from_file("quads.obj")
+	//model, err = read_model_from_file("cube.obj")
+	model, err = read_model_from_file("viking_room.obj")
+	if err {
+		log.panicf("Error loading the model file: %v", err)
+	}
+
+	vertex_set: map[Vertex]u32
+	for face in model.faces {
+		vertex := Vertex {
+			position = model.vertices[face.vertex_index], // from vertex array 
+			tex_coord = {model.texcoords[face.texture_index].x, 1 - model.texcoords[face.texture_index].y}, // from texcoord array
+			color = {1, 1, 1}
+		}
+		
+		if vertex not_in vertex_set {
+			vertex_set[vertex] = u32(len(model_verts))
+			append(&model_verts, vertex)
+		}
+
+		append(&model_indices, vertex_set[vertex])
+	}
 }
 
 
@@ -1043,43 +1076,68 @@ create_image_view :: proc(image: vk.Image, format: vk.Format, aspect_mask: vk.Im
 import "core:image/jpeg"
 import stbi "vendor:stb/image"
 
+model_verts: [dynamic]Vertex
+model_indices: [dynamic]u32
+model_vertex_buffer: vk.Buffer
+model_vertex_buffer_memory: vk.DeviceMemory
+
 create_texture_image :: proc() {
 
-	w, h, c: i32
+	width, height, channels: i32
+	//pixels := stbi.load("textures/face.jpg", &width, &height, nil, 4)
+	pixels := stbi.load(model_tex, &width, &height, nil, 4)
 
-	pixels := stbi.load(model_tex, &w, &h, &c, 4)
-
-
-
-
-
-
-	//import stbi "vendor:stb/image"  :::    pixels := stbi.load("textures/face.jpg", &width, &height, nil, 4)
-	if image, err := jpeg.load_from_file("textures/face.jpg", options={.alpha_add_if_missing}); err == nil { 
-		
-		image_size := vk.DeviceSize(image.width * image.height * image.channels)
-
-		staging_buffer: vk.Buffer
-		staging_buffer_memory: vk.DeviceMemory
-
-		create_buffer(image_size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging_buffer, &staging_buffer_memory)
-
-		data: rawptr
-		vk.MapMemory(app.device, staging_buffer_memory, 0, image_size, {}, &data)
-		mem.copy(data, &image.pixels.buf[0], int(image_size))
-		vk.UnmapMemory(app.device, staging_buffer_memory)
-
-		create_image(u32(image.width), u32(image.height), .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &app.texture_image, &app.texture_image_memory)
-
-		transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
-		copy_buffer_to_image(staging_buffer, app.texture_image, u32(image.width), u32(image.height))
-		transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
-
-		vk.DestroyBuffer(app.device, staging_buffer, nil)
-		vk.FreeMemory(app.device, staging_buffer_memory, nil)
-	} else {
-		log.panicf("Image load error: %v", err)
+	if pixels == nil {
+		log.panic("Couldnt load image")
 	}
+
+	image_size := vk.DeviceSize(width * height * 4)
+
+	staging_buffer: vk.Buffer
+	staging_buffer_memory: vk.DeviceMemory
+
+	create_buffer(image_size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging_buffer, &staging_buffer_memory)
+
+	data: rawptr
+	vk.MapMemory(app.device, staging_buffer_memory, 0, image_size, {}, &data)
+	mem.copy(data, &pixels[0], int(image_size))
+	vk.UnmapMemory(app.device, staging_buffer_memory)
+
+	create_image(u32(width), u32(height), .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &app.texture_image, &app.texture_image_memory)
+
+	transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+	copy_buffer_to_image(staging_buffer, app.texture_image, u32(width), u32(height))
+	transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
+
+	vk.DestroyBuffer(app.device, staging_buffer, nil)
+	vk.FreeMemory(app.device, staging_buffer_memory, nil)
+
+
+	// if image, err := jpeg.load_from_file("textures/face.jpg", options={.alpha_add_if_missing}); err == nil { 
+		
+	// 	image_size := vk.DeviceSize(image.width * image.height * image.channels)
+
+	// 	staging_buffer: vk.Buffer
+	// 	staging_buffer_memory: vk.DeviceMemory
+
+	// 	create_buffer(image_size, {.TRANSFER_SRC}, {.HOST_VISIBLE, .HOST_COHERENT}, &staging_buffer, &staging_buffer_memory)
+
+	// 	data: rawptr
+	// 	vk.MapMemory(app.device, staging_buffer_memory, 0, image_size, {}, &data)
+	// 	mem.copy(data, &image.pixels.buf[0], int(image_size))
+	// 	vk.UnmapMemory(app.device, staging_buffer_memory)
+
+	// 	create_image(u32(image.width), u32(image.height), .R8G8B8A8_SRGB, .OPTIMAL, {.TRANSFER_DST, .SAMPLED}, {.DEVICE_LOCAL}, &app.texture_image, &app.texture_image_memory)
+
+	// 	transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .UNDEFINED, .TRANSFER_DST_OPTIMAL)
+	// 	copy_buffer_to_image(staging_buffer, app.texture_image, u32(image.width), u32(image.height))
+	// 	transition_image_layout(app.texture_image, .R8G8B8A8_SRGB, .TRANSFER_DST_OPTIMAL, .SHADER_READ_ONLY_OPTIMAL)
+
+	// 	vk.DestroyBuffer(app.device, staging_buffer, nil)
+	// 	vk.FreeMemory(app.device, staging_buffer_memory, nil)
+	// } else {
+	// 	log.panicf("Image load error: %v", err)
+	// }
 }
 
 begin_single_time_commands :: proc() -> vk.CommandBuffer {
@@ -1282,7 +1340,8 @@ create_descriptor_set_layout :: proc() {
 }
 
 create_index_buffer :: proc() {
-	buffer_size :vk.DeviceSize= size_of(u32) * size_of(INDICES)
+	//buffer_size :vk.DeviceSize= size_of(u32) * size_of(INDICES)
+	buffer_size := vk.DeviceSize(size_of(u32) * len(model_indices))
 
 	staging_buffer: vk.Buffer
 	staging_buffer_memory: vk.DeviceMemory
@@ -1291,7 +1350,10 @@ create_index_buffer :: proc() {
 
 	data: rawptr
 	assert_success(vk.MapMemory(app.device, staging_buffer_memory, 0, buffer_size, {}, &data))
-	mem.copy(data, raw_data(INDICES), cast(int)buffer_size)
+	//mem.copy(data, raw_data(INDICES), cast(int)buffer_size)
+	mem.copy(data, &model_indices[0], cast(int)buffer_size)
+	vk.UnmapMemory(app.device, staging_buffer_memory)
+
 
 	create_buffer(buffer_size, {.TRANSFER_DST, .INDEX_BUFFER}, {.DEVICE_LOCAL}, &app.index_buffer, &app.index_buffer_memory)
 
@@ -1302,7 +1364,8 @@ create_index_buffer :: proc() {
 }
 
 create_vertex_buffer :: proc() {
-	buffer_size :vk.DeviceSize=  size_of(Vertex) * size_of(VERTICES)
+	//buffer_size :vk.DeviceSize = size_of(Vertex) * size_of(VERTICES)
+	buffer_size := vk.DeviceSize(size_of(Vertex) * len(model_verts))
 
 	staging_buffer: vk.Buffer
 	staging_buffer_memory: vk.DeviceMemory
@@ -1311,7 +1374,8 @@ create_vertex_buffer :: proc() {
 
 	data: rawptr
 	assert_success(vk.MapMemory(app.device, staging_buffer_memory, 0, buffer_size, {}, &data))
-	mem.copy(data, raw_data(VERTICES), cast(int)buffer_size)
+	//mem.copy(data, raw_data(VERTICES), cast(int)buffer_size)
+	mem.copy(data, &model_verts[0], cast(int)buffer_size)
 	vk.UnmapMemory(app.device, staging_buffer_memory)
 
 	create_buffer(buffer_size, {.TRANSFER_DST, .VERTEX_BUFFER}, {.DEVICE_LOCAL}, &app.vertex_buffer, &app.vertex_buffer_memory)
