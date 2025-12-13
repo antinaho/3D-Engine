@@ -16,6 +16,9 @@ import "core:math/linalg/glsl"
 vert_shader_code :: #load("shaders/vert.spv")
 frag_shader_code :: #load("shaders/frag.spv")
 
+model :: "viking_room.obj"
+model_tex :: "viking_room.png"
+
 app: ^App
 MAX_FRAMES_IN_FLIGHT :: 2
 
@@ -179,23 +182,29 @@ glfw_init :: proc() {
 	
 	glfw.SetErrorCallback(glfw_error_callback)
 
-	if !glfw.Init() { log.panicf("GLFW: Failed to initialize") }
+	if !glfw.Init() { 
+		log.panic("GLFW: Failed to initialize")
+	}
 
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	glfw.WindowHint(glfw.VISIBLE, glfw.TRUE)
 	glfw.WindowHint(glfw.RESIZABLE, glfw.TRUE) //glfw.WindowHint(glfw.RESIZABLE, glfw.FALSE)
 
-	glfw_window := glfw.CreateWindow(app.width, app.height, strings.clone_to_cstring(app.title, context.temp_allocator), nil, nil);
+	window := glfw.CreateWindow(app.width, app.height, strings.clone_to_cstring(app.title, context.temp_allocator), nil, nil);
 
-	if glfw_window == nil { log.panicf("GLFW: Failed to create GLFW window") }
+	if window == nil {
+		log.panic("GLFW: Failed to create GLFW window")
+	}
 
-	glfw.SetWindowUserPointer(glfw_window, app)
-	glfw.SetFramebufferSizeCallback(glfw_window, glfw_frame_buffer_resize_callback)
+	glfw.SetWindowUserPointer(window, app)
+	glfw.SetFramebufferSizeCallback(window, glfw_frame_buffer_resize_callback)
 
-	app.window = glfw_window
+	app.window = window
 
 	vk.load_proc_addresses_global(cast(rawptr)glfw.GetInstanceProcAddress)
-	assert(vk.CreateInstance != nil, "vulkan function pointers not loaded")
+	if vk.CreateInstance == nil {
+		log.panic("Vulkan function pointers not loaded")
+	}
 }
 
 glfw_frame_buffer_resize_callback :: proc "c" (window: glfw.WindowHandle, width, height: c.int) {
@@ -825,9 +834,6 @@ when ODIN_OS == .Darwin {
 	vk.load_proc_addresses_instance(app.instance)
 }
 
-
-
-
 cleanup :: proc() {
 	cleanup_swapchain()
 
@@ -946,12 +952,6 @@ create_depth_resources :: proc() {
 	create_image(app.swapchain_extent.width, app.swapchain_extent.height, depth_format, .OPTIMAL, {.DEPTH_STENCIL_ATTACHMENT}, {.DEVICE_LOCAL}, &app.depth_image, &app.depth_image_memory)
 
 	app.depth_image_view = create_image_view(app.depth_image, depth_format, {.DEPTH})
-	
-
-
-
-
-
 }
 
 find_depth_format :: proc() -> vk.Format {
@@ -1041,8 +1041,19 @@ create_image_view :: proc(image: vk.Image, format: vk.Format, aspect_mask: vk.Im
 
 
 import "core:image/jpeg"
+import stbi "vendor:stb/image"
 
 create_texture_image :: proc() {
+
+	w, h, c: i32
+
+	pixels := stbi.load(model_tex, &w, &h, &c, 4)
+
+
+
+
+
+
 	//import stbi "vendor:stb/image"  :::    pixels := stbi.load("textures/face.jpg", &width, &height, nil, 4)
 	if image, err := jpeg.load_from_file("textures/face.jpg", options={.alpha_add_if_missing}); err == nil { 
 		
@@ -1394,41 +1405,6 @@ copy_buffer :: proc(src, dst: vk.Buffer, size: vk.DeviceSize) {
 	vk.CmdCopyBuffer(command_buffer, src, dst, 1, &copy_region)
 
 	end_single_time_commands(command_buffer)
-
-
-	// alloc_info := vk.CommandBufferAllocateInfo {
-	// 	sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-	// 	level = .PRIMARY,
-	// 	commandPool = app.command_pool,
-	// 	commandBufferCount = 1
-	// }
-
-	// command_buffer: vk.CommandBuffer
-	// assert_success(vk.AllocateCommandBuffers(app.device, &alloc_info, &command_buffer))
-
-	// begin_info := vk.CommandBufferBeginInfo {
-	// 	sType = .COMMAND_BUFFER_BEGIN_INFO,
-	// 	flags = {.ONE_TIME_SUBMIT}
-	// }
-
-	// assert_success(vk.BeginCommandBuffer(command_buffer, &begin_info))
-
-	
-
-	// vk.CmdCopyBuffer(command_buffer, src, dst, 1, &copy_region)
-
-	// vk.EndCommandBuffer(command_buffer)
-
-	// submit_info := vk.SubmitInfo {
-	// 	sType = .SUBMIT_INFO,
-	// 	commandBufferCount = 1,
-	// 	pCommandBuffers = &command_buffer,
-	// }
-
-	// vk.QueueSubmit(app.graphics_queue, 1, &submit_info, 0)
-	// vk.QueueWaitIdle(app.graphics_queue)
-
-	// vk.FreeCommandBuffers(app.device, app.command_pool, 1, &command_buffer)
 }
 
 create_buffer :: proc(size: vk.DeviceSize, usage: vk.BufferUsageFlags, properties: vk.MemoryPropertyFlags, buffer: ^vk.Buffer, buffer_memory: ^vk.DeviceMemory) {
@@ -1488,8 +1464,6 @@ draw_frame :: proc() {
 
 	assert_success(vk.WaitForFences(app.device, 1, &app.in_flight_fences[app.current_frame], true, max(u64)))
 	
-	
-
 	image_index: u32
 	result := vk.AcquireNextImageKHR(app.device, app.swapchain, max(u64), app.image_available_semaphores[app.current_frame], 0, &image_index)
 
