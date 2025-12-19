@@ -165,6 +165,7 @@ ExampleLayer :: Layer {
 _events :: proc(input: ^WindowInput) {
 	 if key_went_down(input, .E) {
 		fmt.println("Pressed E LayerOne")
+		ingest_key(input, .E)
 	 }
 }
 
