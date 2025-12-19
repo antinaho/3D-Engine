@@ -303,7 +303,7 @@ when ODIN_DEBUG {
 
 	
 	{ // Surface
-		assert_success(vk_wsi.create_surface(window.window_handle(), state.instance, &state.surface))
+		//assert_success(vk_wsi.create_surface(window.window_handle(), state.instance, &state.surface))
 	} log.debug("Vk: Surface created")
 
 	{ // Physical device
@@ -1065,8 +1065,8 @@ vk_draw :: proc() {
 
 	present_result := vk.QueuePresentKHR(state.present_queue, &present_info)
 
-	if present_result == .ERROR_OUT_OF_DATE_KHR || present_result == .SUBOPTIMAL_KHR || window.framebuffer_resized() {
-		window.set_framebuffer_resized(false)
+	if present_result == .ERROR_OUT_OF_DATE_KHR || present_result == .SUBOPTIMAL_KHR { //|| window.framebuffer_resized() {
+		//window.set_framebuffer_resized(false)
 		recreate_swapchain()
 	} else if  present_result != .SUCCESS {
 		log.panic("Failed to present swapchain image")
@@ -1154,9 +1154,9 @@ update_uniform_buffer :: proc(current_image: u32) {
 
 recreate_swapchain :: proc() {
 	
-	width, height := window.get_framebuffer_size()
+	width, height := 100, 100 //window.get_framebuffer_size()
 	for width == 0 || height == 0 {
-		width, height = window.get_framebuffer_size()
+		width, height = 100, 100 //window.get_framebuffer_size()
 		//window.wait_events()
 		if close_requested() {
 			break
@@ -1237,7 +1237,7 @@ create_swapchain :: proc() {
 			return capabilities.currentExtent
 		} 
 		
-		width, height := window.get_framebuffer_size()
+		width, height := 100, 100 //window.get_framebuffer_size()
 		actual_extend := vk.Extent2D {
 			width = cast(u32)width,
 			height = cast(u32)height

@@ -2,32 +2,61 @@ package main
 
 import "base:runtime"
 
-WindowInterface :: struct {
-	state_size: proc() -> int,
-	init: proc(window_state: rawptr, width, height: int, title: string, allocator: runtime.Allocator),
+// WindowInterface :: struct {
+// 	state_size: proc() -> int,
+// 	init: proc(window_state: rawptr, width, height: int, title: string, allocator: runtime.Allocator),
 	
-	process_events: proc(),
-	get_events: proc() -> []Event,
-	clear_events: proc(),
+// 	process_events: proc(),
+// 	get_events: proc() -> []Event,
+// 	clear_events: proc(),
 	
-	shutdown: proc(),
-	window_handle: proc() -> rawptr,
-	get_framebuffer_size: proc() -> (int, int),
+// 	close: proc(),
+// 	window_handle: proc() -> WindowHandle,
+// }
 
-	framebuffer_resized: proc() -> bool,
-	set_framebuffer_resized: proc(state: bool),
+WindowAPI :: struct {
+	close: proc(window: ^Window),
+	process_events: proc(window: ^Window),
+	get_events: proc(window: ^Window) -> []Event,
+	clear_events: proc(window: ^Window),
 }
+
+Window :: struct {
+	using api : WindowAPI,
+	platform: Platform,
+}
+
+WindowFlag :: enum {
+	MainWindow,
+}
+
+WindowFlags :: bit_set[WindowFlag]
+
+Platform :: distinct uintptr
 
 Event :: union {
 	WindowEventCloseRequested,
+
 	KeyPressedEvent,
 	KeyReleasedEvent,
-	WindowResizeEvent,
-	WindowFramebufferResizeEvent,
+
 	MousePressedEvent,
 	MouseReleasedEvent,
 	MousePositionEvent,
 	MouseScrollEvent,
+
+	WindowResizeEvent,
+
+	WindowMinimizeStartEvent,
+	WindowMinimizeEndEvent,
+
+	WindowEnterFullscreenEvent,
+	WindowExitFullscreenEvent,
+
+	WindowMoveEvent,
+
+	WindowDidBecomeKey,
+	WindowDidResignKey,
 }
 
 WindowEventCloseRequested :: struct {}
@@ -35,10 +64,20 @@ WindowEventCloseRequested :: struct {}
 KeyPressedEvent :: struct { key: KeyboardKey }
 KeyReleasedEvent :: struct { key: KeyboardKey }
 
-WindowResizeEvent :: struct { width, height: int}
-WindowFramebufferResizeEvent :: struct { width, height: int }
-
 MousePressedEvent :: struct { button: MouseButton }
 MouseReleasedEvent :: struct { button: MouseButton }
 MousePositionEvent :: struct { x, y: f64 }
 MouseScrollEvent :: struct { x, y: f64 }
+
+WindowResizeEvent :: struct { width, height: int}
+
+WindowMinimizeStartEvent :: struct { }
+WindowMinimizeEndEvent :: struct { }
+
+WindowEnterFullscreenEvent :: struct { }
+WindowExitFullscreenEvent :: struct { }
+
+WindowMoveEvent :: struct { x, y: int }
+
+WindowDidBecomeKey :: struct { }
+WindowDidResignKey :: struct { }

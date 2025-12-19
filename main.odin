@@ -3,7 +3,6 @@ package main
 import "core:mem"
 import "base:runtime"
 import "core:fmt"
-import "vendor:glfw"
 import "core:log"
 
 _ :: fmt
@@ -16,23 +15,32 @@ model_tex :: "viking_room.png"
 
 @(private="file")
 application: ^Application
-window: WindowInterface
+
+//window: WindowInterface
 renderer: RendererInterface
+
+WindowInput :: struct {
+	keys_press_started: #sparse [KeyboardKey]bool,
+	keys_held: #sparse [KeyboardKey]bool,
+	keys_released: #sparse [KeyboardKey]bool,
+}
+
+ApplicationWindow :: struct {
+	window: Window,
+	close_requested: bool,
+	is_main_window: bool,
+
+	using _ : WindowInput,
+	layers: [dynamic]Layer,
+}
 
 Application :: struct {
 	ctx: runtime.Context,
 
-	window_state: rawptr,
-	window_interface: WindowInterface,
+	windows: [dynamic]ApplicationWindow,
 
 	renderer_state: rawptr,
-	renderer_interface: RendererInterface,
-
-	close_requested: bool,
-
-	keys_press_started: #sparse [KeyboardKey]bool,
-	keys_held: #sparse [KeyboardKey]bool,
-	keys_released: #sparse [KeyboardKey]bool,
+	renderer_interface: RendererInterface,	
 }
 
 init :: proc(width, height: int, title: string, allocator := context.allocator, loc := #caller_location) -> ^Application {
@@ -40,26 +48,32 @@ init :: proc(width, height: int, title: string, allocator := context.allocator, 
 
 	application = new(Application, context.allocator, loc)
 	application.ctx = context
+	application.windows = make([dynamic]ApplicationWindow)
 	
-	when ODIN_OS == .Darwin {
-		application.window_interface = WINDOW_MAC
-	} else {
-		log.panic("Only works on Mac")
-	}
+	append(&application.windows, ApplicationWindow{ is_main_window=true, window=window_create_mac(width, height, title, application.ctx, allocator, {.MainWindow})^ })
+	
+	append(&application.windows[0].layers, ExampleLayer)
+	//append(&application.windows, ApplicationWindow{ window=window_create_mac(width, height, title, application.ctx, allocator, {})^ })
 
-	window_config_alloc_error: runtime.Allocator_Error
-	application.window_state, window_config_alloc_error = mem.alloc(application.window_interface.state_size(), allocator = allocator)
-	log.assertf(window_config_alloc_error == nil, "Failed allocating memory for window config: %v", window_config_alloc_error)
+	// when ODIN_OS == .Darwin {
+	// 	application.window_interface = WINDOW_MAC
+	// } else {
+	// 	log.panic("Only works on Mac")
+	// }
 
-	application.window_interface.init(application.window_state, width, height, title, allocator)
-	window = application.window_interface
+	// window_state_alloc_error: runtime.Allocator_Error
+	// application.window_state, window_state_alloc_error = mem.alloc(application.window_interface.state_size(), allocator = allocator)
+	// log.assertf(window_state_alloc_error == nil, "Failed allocating memory for window config: %v", window_state_alloc_error)
 
-	wsi: WSI
-	when ODIN_OS == .Darwin {
-		application.renderer_interface = RENDERER_METAL
-	} else {
-		log.panic("not supported renderer")
-	}
+	// application.window_interface.init(application.window_state, width, height, title, allocator)
+	// //window = application.window_interface
+
+	// wsi: WSI
+	// when ODIN_OS == .Darwin {
+	// 	application.renderer_interface = RENDERER_METAL
+	// } else {
+	// 	log.panic("not supported renderer")
+	// }
 
 // when RENDERER_KIND == "Vulkan" {
 // 	application.renderer_interface = RENDERER_VULKAN
@@ -68,126 +82,175 @@ init :: proc(width, height: int, title: string, allocator := context.allocator, 
 // 	log.panic("Not supported renderer")
 // }
 
-	renderer_config_alloc_error: runtime.Allocator_Error
-	application.renderer_state, renderer_config_alloc_error = mem.alloc(application.renderer_interface.config_size(), allocator = allocator)
-	log.assertf(renderer_config_alloc_error == nil, "Failed allocating renderer config: %v", renderer_config_alloc_error)
+	// renderer_config_alloc_error: runtime.Allocator_Error
+	// application.renderer_state, renderer_config_alloc_error = mem.alloc(application.renderer_interface.config_size(), allocator = allocator)
+	// log.assertf(renderer_config_alloc_error == nil, "Failed allocating renderer config: %v", renderer_config_alloc_error)
 
-	application.renderer_interface.init(wsi, application.renderer_state)
-	renderer = application.renderer_interface
+	// application.renderer_interface.init(wsi, application.renderer_state)
+	// renderer = application.renderer_interface
 	
 	return application
 }
 
 close_requested :: proc() -> bool {
-	return application.close_requested
+	#reverse for &aw, i in application.windows {
+		if !aw.is_main_window && aw.close_requested {
+			aw.window.close(&aw.window)
+			ordered_remove(&application.windows, i)
+		}
+
+		if aw.is_main_window && aw.close_requested {
+			return true
+		}
+	}
+
+	return false
 }
 
-process_events :: proc() {
-	application.keys_press_started = {}
-	application.keys_released = {}
-	
-	application.window_interface.process_events()
+update_window :: proc(aw: ^ApplicationWindow) {
+	aw.keys_press_started = {}
+	aw.keys_released = {}
 
-	events := application.window_interface.get_events()
+	aw.window.process_events(&aw.window)
+
+	events := aw.window.get_events(&aw.window)
 
 	for &event in events {
 		switch &e in event {
 			case WindowEventCloseRequested:
-				//log.debug("Close requested")
-				application.close_requested = true
+				aw.close_requested = true
 			case KeyPressedEvent:
-				//log.debugf("Pressed key %v", e.key)
-				// if e.key == .Escape {
-				// 	application.close_requested = true
-				// }
-				application.keys_press_started[e.key] = application.keys_held[e.key] ~ true
-				application.keys_held[e.key] = true
+				aw.keys_press_started[e.key] = aw.keys_held[e.key] ~ true
+				aw.keys_held[e.key] = true
 			case KeyReleasedEvent:
-				//log.debugf("Released key %v", e.key)
-				application.keys_released[e.key] = true
-				application.keys_held[e.key] = false
+				aw.keys_released[e.key] = true
+				aw.keys_held[e.key] = false
 			case WindowResizeEvent:
-				//log.debugf("Window resized %v : %v", e.width, e.height)
-			case WindowFramebufferResizeEvent:
-				window.set_framebuffer_resized(true)
-				//log.debugf("Window framebuffer resized %v : %v", e.width, e.height)
+				fmt.println("LOL")
+			case WindowMinimizeStartEvent:
+				fmt.println("Smol")
+			case WindowMinimizeEndEvent:
+				fmt.println("BIG")
+			case WindowEnterFullscreenEvent:
+				fmt.println("WOW")
+			case WindowExitFullscreenEvent:
+				fmt.println("we so back")
+			case WindowMoveEvent:
+				fmt.println("chill--", aw.is_main_window)
+			case WindowDidBecomeKey:
+			case WindowDidResignKey:
 			case MousePressedEvent:
-				//log.debugf("Mouse button pressed %v", e.button)
 			case MouseReleasedEvent:
-				//log.debugf("Mouse button released %v", e.button)
 			case MousePositionEvent:
-				//log.debugf("Mouse moved %v x %v", e.x, e.y)
 			case MouseScrollEvent:
-				//log.debugf("Mouse scrolled %v x %v", e.x, e.y)
 		}
 	}
 
-	application.window_interface.clear_events()
+	#reverse for &layer in aw.layers {
+		if layer.ingest_events != nil { layer.ingest_events(aw) }
+	}
+
+	aw.window.clear_events(&aw.window)
+
+	for layer in aw.layers {
+		if layer.update != nil { layer.update(delta) }
+	}
+}
+
+ExampleLayer :: Layer {
+	ingest_events = _events,
+	update = _update,
+}
+
+_events :: proc(input: ^WindowInput) {
+	 if key_went_down(input, .E) {
+		fmt.println("Pressed E LayerOne")
+	 }
+}
+
+_update :: proc(delta: f32) {
+
+}
+
+Layer :: struct {
+	update: proc(delta: f32),
+	ingest_events: proc(input: ^WindowInput),
 }
 
 main :: proc() {
-	context.allocator = runtime.default_allocator()
-
-	default_allocator := context.allocator
-	tracking_allocator: mem.Tracking_Allocator
-	mem.tracking_allocator_init(&tracking_allocator, default_allocator)
-	context.allocator = mem.tracking_allocator(&tracking_allocator)
-	defer reset_tracking_allocator(&tracking_allocator)
+	// default_allocator := context.allocator
+	// tracking_allocator: mem.Tracking_Allocator
+	// mem.tracking_allocator_init(&tracking_allocator, default_allocator)
+	// context.allocator = mem.tracking_allocator(&tracking_allocator)
+	// defer reset_tracking_allocator(&tracking_allocator)
 
 	context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
 
-	init(1280, 720, "CoolAppi")
+	init(1280, 720, "Hellope")
 
 	for !close_requested() {
 		free_all(context.temp_allocator)
-		process_events()
+		delta = f32(time.duration_seconds(time.tick_since(prev_time)))
+		prev_time = time.tick_now()
+		
+		#reverse for &aw in application.windows {
 
-
-		for layer in layers {
-			
+			update_window(&aw)
 		}
-
-
-
-		renderer.draw()
+		
+		//renderer.draw()
 	}
 
-	renderer.cleanup()
-	window.shutdown()	
-	free(application)
+	//renderer.cleanup()
+	//window.shutdown()	
+	//free(application)
 }
 
-layers: []Layer
-Layer :: struct {
+import "core:time"
+delta: f32
+prev_time := time.tick_now()
 
+DELTA :: 1.0 / 60.0
+
+scenes: []^Scene
+Scene :: struct {
+	event_proc: proc(),
+	update_proc: proc(delta: f32),
 }
 
 
-// Returns true if a keyboard key went down between the current and the previous frame. Set when
-// 'process_events' runs (probably once per frame).
-key_went_down :: proc(key: KeyboardKey) -> bool {
-	return application.keys_press_started[key]
+
+ingest_key :: proc(input: ^WindowInput, key: KeyboardKey) {
+	input.keys_press_started[key] = false
+	input.keys_held[key] = false
 }
 
-// Returns true if a keyboard key went up (was released) between the current and the previous frame.
-// Set when 'process_events' runs (probably once per frame).
-key_went_up :: proc(key: KeyboardKey) -> bool {
-	return application.keys_released[key]
+
+// // Returns true if a keyboard key went down between the current and the previous frame. Set when
+// // 'process_events' runs (probably once per frame).
+key_went_down :: proc(input: ^WindowInput, key: KeyboardKey) -> bool {
+	return input.keys_press_started[key]
 }
 
-// Returns true if a keyboard is currently being held down. Set when 'process_events' runs (probably
-// once per frame).
-key_is_held :: proc(key: KeyboardKey) -> bool {
-	return application.keys_held[key]
-}
+// // Returns true if a keyboard key went up (was released) between the current and the previous frame.
+// // Set when 'process_events' runs (probably once per frame).
+// key_went_up :: proc(key: KeyboardKey) -> bool {
+// 	return application.keys_released[key]
+// }
+
+// // Returns true if a keyboard is currently being held down. Set when 'process_events' runs (probably
+// // once per frame).
+// key_is_held :: proc(key: KeyboardKey) -> bool {
+// 	return application.keys_held[key]
+// }
 
 
 reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> (err: bool) {
 	fmt.println("Tracking allocator: ")
 
 	for _, val in a.allocation_map {
-		fmt.println("%v: Leaked %v bytes", val.location, val.size)
+		fmt.printfln("%v: Leaked %v bytes", val.location, val.size)
 		err = true
 	}
 
@@ -334,5 +397,7 @@ KeyboardKey :: enum {
 	JIS_Kana			= 0x7C,
 	ISO_Section			= 0x7D,
 }
+
+
 
 

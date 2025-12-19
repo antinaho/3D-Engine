@@ -41,76 +41,76 @@ state: ^MetalRenderState
 
 metal_init :: proc(wsi: WSI, renderer_state: rawptr) -> rawptr {
 
-    state = (^MetalRenderState)(renderer_state)
+    // state = (^MetalRenderState)(renderer_state)
 
-    state.device = MTL.CreateSystemDefaultDevice()
+    // state.device = MTL.CreateSystemDefaultDevice()
 
-    fmt.println(state.device->name()->odinString())
+    // fmt.println(state.device->name()->odinString())
     
-    w := cast(^NS.Window)window.window_handle()
+    // w := cast(^NS.Window)window.window_handle()
 
-    state.swapchain = CA.MetalLayer.layer()
-    state.swapchain->setDevice(state.device)
-    state.swapchain->setPixelFormat(.BGRA8Unorm_sRGB)
-    state.swapchain->setFramebufferOnly(true)
-    state.swapchain->setFrame(w->frame())
+    // state.swapchain = CA.MetalLayer.layer()
+    // state.swapchain->setDevice(state.device)
+    // state.swapchain->setPixelFormat(.BGRA8Unorm_sRGB)
+    // state.swapchain->setFramebufferOnly(true)
+    // state.swapchain->setFrame(w->frame())
 
-    w->contentView()->setLayer(state.swapchain)
-    w->setOpaque(true)
-    w->setBackgroundColor(nil)
+    // w->contentView()->setLayer(state.swapchain)
+    // w->setOpaque(true)
+    // w->setBackgroundColor(nil)
 
-    state.command_queue = state.device->newCommandQueue()
+    // state.command_queue = state.device->newCommandQueue()
     
-    state.compile_options = NS.new(MTL.CompileOptions)
+    // state.compile_options = NS.new(MTL.CompileOptions)
 
-    program_source :: `
-	using namespace metal;
-	struct ColoredVertex {
-		float4 position [[position]];
-		float4 color;
-	};
-	vertex ColoredVertex vertex_main(constant float4 *position [[buffer(0)]],
-	                                 constant float4 *color    [[buffer(1)]],
-	                                 uint vid                  [[vertex_id]]) {
-		ColoredVertex vert;
-		vert.position = position[vid];
-		vert.color    = color[vid];
-		return vert;
-	}
-	fragment float4 fragment_main(ColoredVertex vert [[stage_in]]) {
-		return vert.color;
-	}
-	`
+    // program_source :: `
+	// using namespace metal;
+	// struct ColoredVertex {
+	// 	float4 position [[position]];
+	// 	float4 color;
+	// };
+	// vertex ColoredVertex vertex_main(constant float4 *position [[buffer(0)]],
+	//                                  constant float4 *color    [[buffer(1)]],
+	//                                  uint vid                  [[vertex_id]]) {
+	// 	ColoredVertex vert;
+	// 	vert.position = position[vid];
+	// 	vert.color    = color[vid];
+	// 	return vert;
+	// }
+	// fragment float4 fragment_main(ColoredVertex vert [[stage_in]]) {
+	// 	return vert.color;
+	// }
+	// `
 
-    program_library := state.device->newLibraryWithSource(NS.AT(program_source), state.compile_options) or_return
+    // program_library := state.device->newLibraryWithSource(NS.AT(program_source), state.compile_options) or_return
 
-    vertex_program := program_library->newFunctionWithName(NS.AT("vertex_main"))
-    fragment_program := program_library->newFunctionWithName(NS.AT("fragment_main"))
+    // vertex_program := program_library->newFunctionWithName(NS.AT("vertex_main"))
+    // fragment_program := program_library->newFunctionWithName(NS.AT("fragment_main"))
 
-    assert(vertex_program != nil)
-    assert(fragment_program != nil)
+    // assert(vertex_program != nil)
+    // assert(fragment_program != nil)
 
-    pipeline_state_descriptor := NS.new(MTL.RenderPipelineDescriptor)
-    pipeline_state_descriptor->colorAttachments()->object(0)->setPixelFormat(.BGRA8Unorm_sRGB)
-    pipeline_state_descriptor->setVertexFunction(vertex_program)
-    pipeline_state_descriptor->setFragmentFunction(fragment_program)
+    // pipeline_state_descriptor := NS.new(MTL.RenderPipelineDescriptor)
+    // pipeline_state_descriptor->colorAttachments()->object(0)->setPixelFormat(.BGRA8Unorm_sRGB)
+    // pipeline_state_descriptor->setVertexFunction(vertex_program)
+    // pipeline_state_descriptor->setFragmentFunction(fragment_program)
 
 
-    state.pipelinestate = state.device->newRenderPipelineState(pipeline_state_descriptor)  or_return
+    // state.pipelinestate = state.device->newRenderPipelineState(pipeline_state_descriptor)  or_return
 
-    positions := [?][4]f32{
-		{ 0.0,  0.5, 0, 1},
-		{-0.5, -0.5, 0, 1},
-		{ 0.5, -0.5, 0, 1},
-	}
-	colors := [?][4]f32{
-		{1, 0, 0, 1},
-		{0, 1, 0, 1},
-		{0, 0, 1, 1},
-	}
+    // positions := [?][4]f32{
+	// 	{ 0.0,  0.5, 0, 1},
+	// 	{-0.5, -0.5, 0, 1},
+	// 	{ 0.5, -0.5, 0, 1},
+	// }
+	// colors := [?][4]f32{
+	// 	{1, 0, 0, 1},
+	// 	{0, 1, 0, 1},
+	// 	{0, 0, 1, 1},
+	// }
 
-    state.position_buffer = state.device->newBufferWithSlice(positions[:], {})
-	state.color_buffer    = state.device->newBufferWithSlice(colors[:],    {})
+    // state.position_buffer = state.device->newBufferWithSlice(positions[:], {})
+	// state.color_buffer    = state.device->newBufferWithSlice(colors[:],    {})
 
     return nil
 }

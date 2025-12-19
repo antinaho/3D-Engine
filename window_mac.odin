@@ -1,142 +1,252 @@
-#+private file
 
 package main
 
 import NS "core:sys/darwin/Foundation"
 
+import "base:intrinsics"
 import "base:runtime"
 import "core:log"
 
-@(private="package")
-WINDOW_MAC :: WindowInterface {
-	init = mac_init,
-	state_size = mac_state_size,
-
-	process_events = mac_process_events,
-	get_events = mac_get_events,
-	clear_events = mac_clear_events,
-
-	shutdown = mac_shutdown,
-	window_handle = mac_window_handle,
-	get_framebuffer_size = mac_get_framebuffer_size,
-
-	framebuffer_resized = mac_framebuffer_resized,
-	set_framebuffer_resized = mac_set_framebuffer_resized,
+MacWindowAPI :: WindowAPI {
+	process_events = _mac_process_events,
+	clear_events = _mac_clear_events,
+	get_events = _mac_get_events,
+	close = _mac_close_window,
 }
 
-@(private="package")
-MacWindowState :: struct {
-	title: string,
-	width, height: int,
-	framebuffer_resized: bool,
-	events: [dynamic]Event,
-	allocator: runtime.Allocator,
-	custom_context: runtime.Context,
-
+MacPlatform :: struct {
 	window: ^NS.Window,
-    app: ^NS.Application,
+
+	ctx: runtime.Context,
+	events: [dynamic]Event,
+	title: ^NS.String,
+	width: int,
+	height: int,
 }
 
-state: ^MacWindowState
+ns_app: ^NS.Application
 
-mac_set_framebuffer_resized :: proc(val: bool) {
-	state.framebuffer_resized = val
+_mac_clear_events :: proc(w: ^Window) {
+	platform := cast(^MacPlatform)w.platform
+	clear(&platform.events)
 }
 
-mac_framebuffer_resized :: proc() -> bool {
-	return state.framebuffer_resized
+_mac_get_events :: proc(w: ^Window) -> []Event {
+	platform := cast(^MacPlatform)w.platform
+	return platform.events[:]
 }
 
-mac_get_framebuffer_size :: proc() -> (width, height: int) {
-	frame := state.window->frame()
-	width = int(frame.width)
-	height = int(frame.height)
-	return
-}
-
-mac_window_handle :: proc() -> rawptr {
-	return state.window
-}
-
-mac_state_size :: proc() -> int {
-	return size_of(MacWindowState)
-}
-
-mac_shutdown :: proc() {
-	delete(state.events)
-	free(state)
-}
-
-mac_clear_events :: proc() {
-	runtime.clear(&state.events)
-}
-
-mac_init :: proc(window_state: rawptr, width, height: int, title: string, allocator: runtime.Allocator) {	
-	state = (^MacWindowState)(window_state)
-
-	state.app = NS.Application.sharedApplication()
-    state.app->setActivationPolicy(.Regular)
-	rect := NS.Rect{
-		origin = {0, 0},
-		size = {NS.Float(width), NS.Float(height)},
-    }
-
-	state.title = title
-	state.width = width
-	state.height = height
-	state.allocator = allocator
-	state.events = make([dynamic]Event, allocator)
-	state.custom_context = context
-
-	state.window = NS.Window_alloc()
-    state.window->initWithContentRect(rect, { .Resizable, .Closable, .Titled }, .Buffered, NS.NO)
-
-	nstitle := NS.alloc(NS.String)->initWithOdinString(title)
-	defer NS.release(nstitle)
-    state.window->setTitle(nstitle)
-    state.window->setBackgroundColor(NS.Color_whiteColor())
-    state.window->makeKeyAndOrderFront(nil)
-    state.window->center()
-
-	delegate := NS.alloc(GameWindowDelegate)->init()
-
-    state.window->setDelegate(delegate)
-
-    state.app->activate()
-}
-
-mac_process_events :: proc() {
+_mac_process_events :: proc(w: ^Window) {
 	event: ^NS.Event
+	platform := cast(^MacPlatform)w.platform
 	for {
-		event = state.app->nextEventMatchingMask(NS.EventMaskAny, NS.Date_distantPast(), NS.DefaultRunLoopMode, NS.YES)
+		event = ns_app->nextEventMatchingMask(NS.EventMaskAny, NS.Date_distantPast(), NS.DefaultRunLoopMode, true)
 		if event == nil { break }
-
+		
 		#partial switch event->type() {
 			case .KeyDown:
-				append(&state.events, KeyPressedEvent{key=code_to_keyboard_key[event->keyCode()]})
+				append(&platform.events, KeyPressedEvent{key=code_to_keyboard_key[event->keyCode()]})
 			case .KeyUp:
-				append(&state.events, KeyReleasedEvent{key=code_to_keyboard_key[event->keyCode()]})
+				append(&platform.events, KeyReleasedEvent{key=code_to_keyboard_key[event->keyCode()]})
 			case .LeftMouseDown:
-				append(&state.events, MousePressedEvent{button=code_to_mouse_button[MOUSE_LEFT]})
+				append(&platform.events, MousePressedEvent{button=code_to_mouse_button[MouseButton.Left]})
 			case .LeftMouseUp:
-				append(&state.events, MouseReleasedEvent{button=code_to_mouse_button[MOUSE_LEFT]})
+				append(&platform.events, MouseReleasedEvent{button=code_to_mouse_button[MouseButton.Left]})
 			case .RightMouseDown:
-				append(&state.events, MousePressedEvent{button=code_to_mouse_button[MOUSE_RIGHT]})
+				append(&platform.events, MousePressedEvent{button=code_to_mouse_button[MouseButton.Right]})
 			case .RightMouseUp:
-				append(&state.events, MouseReleasedEvent{button=code_to_mouse_button[MOUSE_RIGHT]})
+				append(&platform.events, MouseReleasedEvent{button=code_to_mouse_button[MouseButton.Right]})
 			case .MouseMoved:
 				position := event->locationInWindow()		
-				append(&state.events, MousePositionEvent{x=f64(position.x), y=f64(position.y)})
+				append(&platform.events, MousePositionEvent{x=f64(position.x), y=f64(position.y)})
 			case .ScrollWheel:
 				scroll_x, scroll_y := event->scrollingDelta()
-				append(&state.events, MouseScrollEvent{x=f64(scroll_x), y=f64(scroll_y)})
+				append(&platform.events, MouseScrollEvent{x=f64(scroll_x), y=f64(scroll_y)})
 		}
-		state.app->sendEvent(event)
+		ns_app->sendEvent(event)
 	}
 }
 
-MOUSE_LEFT :: 0
-MOUSE_RIGHT :: 1
+_mac_close_window :: proc(w: ^Window) {
+	platform := cast(^MacPlatform)w.platform
+	platform.window->close()
+}
+
+import "core:fmt"
+
+window_create_mac :: proc(width, height: int, title: string, ctx: runtime.Context, allocator: runtime.Allocator, flags: WindowFlags) -> ^Window {
+	window := new(Window)
+	platform := new(MacPlatform)
+
+	ns_app = NS.Application.sharedApplication()
+	ns_app->setActivationPolicy(.Regular)
+
+	platform.title = NS.alloc(NS.String)->initWithOdinString(title)
+	platform.width = width
+	platform.height = height
+	platform.events = make([dynamic]Event, allocator)
+	platform.ctx = ctx
+	platform.window = NS.Window_alloc()
+
+	rect := NS.Rect{
+		size = {NS.Float(width), NS.Float(height)},
+    }
+
+	platform.window->initWithContentRect(rect, { .Resizable, .Closable, .Titled, .Miniaturizable }, .Buffered, false)
+
+	platform.window->setTitle(platform.title)
+	platform.window->setBackgroundColor(NS.Color_whiteColor())
+
+	if .MainWindow in flags {
+		platform.window->makeKeyAndOrderFront(nil)
+		platform.window->makeMainWindow()	
+	} else {
+		platform.window->makeKeyAndOrderFront(nil)
+	}
+	
+    platform.window->center()
+
+	if class == nil {
+		class = NS.objc_allocateClassPair(intrinsics.objc_find_class("NSObject"), "WindowEventsAPI", 0)
+
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowShouldClose:"), auto_cast windowShouldClose, "v@:@")
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowWillClose:"), auto_cast windowWillClose, "v@:@")
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowDidResize:"), auto_cast windowDidResize, "v@:@")
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowDidMiniaturize:"), auto_cast windowDidMiniaturize, "v@:@")
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowDidDeminiaturize:"), auto_cast windowDidDeminiaturize, "v@:@")
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowDidEnterFullScreen:"), auto_cast windowDidEnterFullScreen, "v@:@")
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowDidExitFullScreen:"), auto_cast windowDidExitFullScreen, "v@:@")
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowDidMove:"), auto_cast windowDidMove, "v@:@")
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowDidBecomeKey:"), auto_cast windowDidBecomeKey, "v@:@")
+		NS.class_addMethod(class, intrinsics.objc_find_selector("windowDidResignKey:"), auto_cast windowDidResignKey, "v@:@")
+				
+		NS.objc_registerClassPair(class)
+	}
+
+	del := NS.class_createInstance(class, size_of(WindowEventsAPI))
+
+	del_internal := cast(^WindowEventsAPI)NS.object_getIndexedIvars(del)
+	del_internal^ = {
+		platform = platform,
+		window_should_close = window_should_close,
+		window_will_close = window_will_close,
+		window_did_resize = window_did_resize,
+		window_did_miniaturize = window_did_miniaturize,
+		window_did_deminiaturize = window_did_deminiaturize,
+		window_did_enter_fullscreen = window_did_enter_fullscreen,
+		window_did_exit_fullscreen = window_did_exit_fullscreen,
+		window_did_move = window_did_move,
+		window_did_become_key = window_did_become_key,
+		window_did_resign_key = window_did_resign_key,
+	}
+			
+	wd := cast(^GameWindowDelegate)del
+
+	platform.window->setDelegate(wd)
+
+	window.api = MacWindowAPI
+	window.platform = cast(Platform)platform
+
+	ns_app->activate()
+	return window
+}
+
+// Cursed stuff
+
+class: ^intrinsics.objc_class
+		
+windowShouldClose :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_should_close(del.platform, notification)
+}
+
+windowWillClose :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_will_close(notification)
+}
+
+windowDidResize :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_resize(del.platform, notification)
+}
+
+
+windowDidMiniaturize :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_miniaturize(del.platform, notification)
+}
+
+windowDidDeminiaturize :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_deminiaturize(del.platform, notification)
+}
+
+windowDidEnterFullScreen :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_enter_fullscreen(del.platform, notification)
+}
+
+
+windowDidExitFullScreen :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_exit_fullscreen(del.platform, notification)
+}
+
+
+windowDidMove :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_move(del.platform, notification)
+}
+
+	windowDidBecomeKey :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_become_key(del.platform, notification)
+}
+
+		windowDidResignKey :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_resign_key(del.platform, notification)
+}
+
+windowDidBecomeMain :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_become_main(del.platform, notification)
+}
+
+windowDidResignMain :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
+	del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
+	context = del.ctx
+	del.window_did_resign_main(del.platform, notification)
+}
+
+WindowEventsAPI :: struct {
+	using platform : ^MacPlatform,
+	window_should_close: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_will_close: proc(notification: ^NS.Notification),
+	window_will_start_live_resize: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_end_live_resize: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_resize: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_miniaturize: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_deminiaturize: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_enter_fullscreen: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_exit_fullscreen: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_move: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_become_key: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_resign_key: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_become_main: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+	window_did_resign_main: proc(platform: ^MacPlatform, notification: ^NS.Notification),
+}
 
 code_to_mouse_button := [3]MouseButton {
 	0 = .Left,
@@ -144,7 +254,6 @@ code_to_mouse_button := [3]MouseButton {
 } 
 
 code_to_keyboard_key := [255]KeyboardKey {
-	
 	NS.kVK.ANSI_1 = .N1,
 	NS.kVK.ANSI_2 = .N2,
 	NS.kVK.ANSI_3 = .N3,
@@ -156,7 +265,6 @@ code_to_keyboard_key := [255]KeyboardKey {
 	NS.kVK.ANSI_9 = .N9,
 	NS.kVK.ANSI_0 = .N0,
 
-	
 	NS.kVK.ANSI_Keypad1 = .NPad1,
 	NS.kVK.ANSI_Keypad2 = .NPad2,
 	NS.kVK.ANSI_Keypad3 = .NPad3,
@@ -257,7 +365,6 @@ code_to_keyboard_key := [255]KeyboardKey {
 	NS.kVK.Tab = .Tab,
 	NS.kVK.Delete = .Backspace,
 
-
 	NS.kVK.ForwardDelete = .ForwardDelete,
 
 	NS.kVK.Home = .Home,
@@ -280,91 +387,75 @@ code_to_keyboard_key := [255]KeyboardKey {
 	NS.kVK.ISO_Section = .ISO_Section,
 }
 
-mac_get_events :: proc() -> []Event {
-	return state.events[:]
-}
-
 @(objc_class="GameWindowDelegate", objc_superclass=NS.Object, objc_implement=true)
 GameWindowDelegate :: struct {
     using _ : NS.WindowDelegate,
 }
 
-@(objc_type=GameWindowDelegate, objc_name="windowShouldClose:")
-window_should_close :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-    context = state.custom_context
-    append(&state.events, WindowEventCloseRequested{})
+///////////////////
+// Closing window
+
+//User requested close
+window_should_close :: proc (platform: ^MacPlatform, notification: ^NS.Notification) {
+	log.debug("Close requested")
+    append(&platform.events, WindowEventCloseRequested{})
 }
 
-@(objc_type=GameWindowDelegate, objc_name="windowWillClose:")
-window_will_close :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-    context = state.custom_context
+window_will_close :: proc (notification: ^NS.Notification) {
     log.debug("Closing")
 }
 
-@(objc_type=GameWindowDelegate, objc_name="windowDidResize:")
-window_did_resize :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-    context = state.custom_context
-	
-	frame := state.window->frame()
-	state.width = int(frame.width)
-	state.height = int(frame.height)
+///////////////////
+// Resizing window
 
-	append(&state.events, WindowResizeEvent{int(frame.width), int(frame.height)})
-	append(&state.events, WindowFramebufferResizeEvent{width=int(frame.width), height=int(frame.height)})
+window_did_resize :: proc (platform: ^MacPlatform, notification: ^NS.Notification) {
+	frame := platform.window->frame()
+	platform.width = int(frame.width)
+	platform.height = int(frame.height)
+
+	append(&platform.events, WindowResizeEvent{int(frame.width), int(frame.height)})
 }
 
-// @(objc_type=GameWindowDelegate, objc_name="windowDidMove:")
-// window_did_move :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-//     context = state.custom_context
-    
-//     frame := state.window->frame()
-//     fmt.printf("[DELEGATE] Window moved to: (%.0f, %.0f)\n", frame.x, frame.y)
-// }
+///////////////////////
+// Minimizing window
 
-// @(objc_type=GameWindowDelegate, objc_name="windowDidBecomeKey:")
-// window_did_become_key :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-//     context = runtime.default_context()
-//     fmt.println("[DELEGATE] Window became key (focused)")
-// }
+window_did_miniaturize :: proc (platform: ^MacPlatform, notification: ^NS.Notification) {
+	append(&platform.events, WindowMinimizeStartEvent{})
+}
 
-// @(objc_type=GameWindowDelegate, objc_name="windowDidResignKey:")
-// window_did_resign_key :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-//     context = runtime.default_context()
-//     fmt.println("[DELEGATE] Window resigned key (lost focus)")
-// }
+window_did_deminiaturize :: proc (platform: ^MacPlatform, notification: ^NS.Notification) {
+	append(&platform.events, WindowMinimizeEndEvent{})
+}
 
-// @(objc_type=GameWindowDelegate, objc_name="windowDidMiniaturize:")
-// window_did_miniaturize :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-//     context = runtime.default_context()
-//     fmt.println("[DELEGATE] Window minimized")
-// }
+///////////////////////
+// Fullscreen window
 
-// @(objc_type=GameWindowDelegate, objc_name="windowDidDeminiaturize:")
-// window_did_deminiaturize :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-//     context = runtime.default_context()
-//     fmt.println("[DELEGATE] Window restored from minimize")
-// }
+window_did_enter_fullscreen :: proc (platform: ^MacPlatform, notification: ^NS.Notification) {
+	append(&platform.events, WindowEnterFullscreenEvent{})
+}
 
-// @(objc_type=GameWindowDelegate, objc_name="windowDidEnterFullScreen:")
-// window_did_enter_fullscreen :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-//     context = runtime.default_context()
-//     fmt.println("[DELEGATE] Window entered fullscreen")
-// }
+window_did_exit_fullscreen :: proc (platform: ^MacPlatform, notification: ^NS.Notification) {
+	append(&platform.events, WindowExitFullscreenEvent{})
+}
 
-// @(objc_type=GameWindowDelegate, objc_name="windowDidExitFullScreen:")
-// window_did_exit_fullscreen :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-//     context = runtime.default_context()
-//     fmt.println("[DELEGATE] Window exited fullscreen")
-// }
+///////////////////////
+// Moving window
 
-// @(objc_type=GameWindowDelegate, objc_name="windowWillStartLiveResize:")
-// window_will_start_live_resize :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-//     context = runtime.default_context()
-//     fmt.println("[DELEGATE] Window will start live resize (user grabbed edge)")
-// }
+window_did_move :: proc (platform: ^MacPlatform, notification: ^NS.Notification) {
+    frame := platform.window->frame()
+	x := frame.x
+	y := frame.y
 
-// @(objc_type=GameWindowDelegate, objc_name="windowDidEndLiveResize:")
-// window_did_end_live_resize :: proc "c" (self: ^GameWindowDelegate, notification: ^NS.Notification) {
-//     context = runtime.default_context()
-//     fmt.println("[DELEGATE] Window did end live resize (user released edge)")
-// }
+	append(&platform.events, WindowMoveEvent{int(x), int(y)})
+}
+
+///////////////////////
+// Focusing window
+
+window_did_become_key :: proc (platform: ^MacPlatform, notification: ^NS.Notification) {
+	append(&platform.events, WindowDidBecomeKey{})
+}
+
+window_did_resign_key :: proc (platform: ^MacPlatform, notification: ^NS.Notification) {
+	append(&platform.events, WindowDidResignKey{})
+}
