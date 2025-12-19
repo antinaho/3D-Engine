@@ -72,8 +72,6 @@ _mac_close_window :: proc(w: ^Window) {
 	platform.window->close()
 }
 
-import "core:fmt"
-
 window_create_mac :: proc(width, height: int, title: string, ctx: runtime.Context, allocator: runtime.Allocator, flags: WindowFlags) -> ^Window {
 	window := new(Window)
 	platform := new(MacPlatform)
@@ -151,7 +149,7 @@ window_create_mac :: proc(width, height: int, title: string, ctx: runtime.Contex
 	return window
 }
 
-// Cursed stuff
+// Cursed swamp
 
 class: ^intrinsics.objc_class
 		
