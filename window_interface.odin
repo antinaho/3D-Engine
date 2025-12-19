@@ -1,19 +1,5 @@
 package main
 
-import "base:runtime"
-
-// WindowInterface :: struct {
-// 	state_size: proc() -> int,
-// 	init: proc(window_state: rawptr, width, height: int, title: string, allocator: runtime.Allocator),
-	
-// 	process_events: proc(),
-// 	get_events: proc() -> []Event,
-// 	clear_events: proc(),
-	
-// 	close: proc(),
-// 	window_handle: proc() -> WindowHandle,
-// }
-
 WindowAPI :: struct {
 	close: proc(window: ^Window),
 	process_events: proc(window: ^Window),
