@@ -4,5 +4,6 @@
 *.frag
 *.vert
 *.dSYM
+*.dSYM/
 textures/
 shaders/
