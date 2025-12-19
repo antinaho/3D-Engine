@@ -1,10 +1,7 @@
 *.spv
 *.obj
 *.png
-*.frag
-*.vert
 *.dSYM
 *.dSYM/
 textures/
-shaders/
 .DS_Store
