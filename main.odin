@@ -4,8 +4,7 @@ import "core:mem"
 import "base:runtime"
 import "core:fmt"
 import "core:log"
-
-_ :: fmt
+import "core:time"
 
 vert_shader_code :: #load("shaders/vert.spv")
 frag_shader_code :: #load("shaders/frag.spv")
@@ -50,23 +49,13 @@ init :: proc(width, height: int, title: string, allocator := context.allocator, 
 	application.ctx = context
 	application.windows = make([dynamic]ApplicationWindow)
 	
-	append(&application.windows, ApplicationWindow{ is_main_window=true, window=window_create_mac(width, height, title, application.ctx, allocator, {.MainWindow})^ })
-	
+	when ODIN_OS == .Darwin {
+		append(&application.windows, ApplicationWindow{ is_main_window=true, window=window_create_mac(width, height, title, application.ctx, allocator, {.MainWindow})^ })
+	} else {
+		log.panic("Only works on Mac")
+	}
+
 	append(&application.windows[0].layers, ExampleLayer)
-	//append(&application.windows, ApplicationWindow{ window=window_create_mac(width, height, title, application.ctx, allocator, {})^ })
-
-	// when ODIN_OS == .Darwin {
-	// 	application.window_interface = WINDOW_MAC
-	// } else {
-	// 	log.panic("Only works on Mac")
-	// }
-
-	// window_state_alloc_error: runtime.Allocator_Error
-	// application.window_state, window_state_alloc_error = mem.alloc(application.window_interface.state_size(), allocator = allocator)
-	// log.assertf(window_state_alloc_error == nil, "Failed allocating memory for window config: %v", window_state_alloc_error)
-
-	// application.window_interface.init(application.window_state, width, height, title, allocator)
-	// //window = application.window_interface
 
 	// wsi: WSI
 	// when ODIN_OS == .Darwin {
@@ -208,44 +197,25 @@ main :: proc() {
 	//free(application)
 }
 
-import "core:time"
 delta: f32
 prev_time := time.tick_now()
-
-DELTA :: 1.0 / 60.0
-
-scenes: []^Scene
-Scene :: struct {
-	event_proc: proc(),
-	update_proc: proc(delta: f32),
-}
-
-
 
 ingest_key :: proc(input: ^WindowInput, key: KeyboardKey) {
 	input.keys_press_started[key] = false
 	input.keys_held[key] = false
 }
 
-
-// // Returns true if a keyboard key went down between the current and the previous frame. Set when
-// // 'process_events' runs (probably once per frame).
 key_went_down :: proc(input: ^WindowInput, key: KeyboardKey) -> bool {
 	return input.keys_press_started[key]
 }
 
-// // Returns true if a keyboard key went up (was released) between the current and the previous frame.
-// // Set when 'process_events' runs (probably once per frame).
-// key_went_up :: proc(key: KeyboardKey) -> bool {
-// 	return application.keys_released[key]
-// }
+key_went_up :: proc(input: ^WindowInput, key: KeyboardKey) -> bool {
+	return input.keys_released[key]
+}
 
-// // Returns true if a keyboard is currently being held down. Set when 'process_events' runs (probably
-// // once per frame).
-// key_is_held :: proc(key: KeyboardKey) -> bool {
-// 	return application.keys_held[key]
-// }
-
+key_is_held :: proc(input: ^WindowInput, key: KeyboardKey) -> bool {
+	return input.keys_held[key]
+}
 
 reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> (err: bool) {
 	fmt.println("Tracking allocator: ")
