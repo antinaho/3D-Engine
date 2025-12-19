@@ -1,3 +1,7 @@
 *.spv
 *.obj
 *.png
+*.frag
+*.vert
+*.dSYM
+textures/
