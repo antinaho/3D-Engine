@@ -57,6 +57,9 @@ init :: proc(width, height: int, title: string, allocator := context.allocator, 
 
 	append(&application.windows[0].layers, ExampleLayer)
 
+	append(&application.windows, ApplicationWindow{ is_main_window=false, window=window_create_mac(width, height, title, application.ctx, allocator, {})^ })
+
+
 	// wsi: WSI
 	// when ODIN_OS == .Darwin {
 	// 	application.renderer_interface = RENDERER_METAL
@@ -152,10 +155,9 @@ ExampleLayer :: Layer {
 }
 
 _events :: proc(input: ^WindowInput) {
-	 if key_went_down(input, .E) {
+	if key_went_down(input, .E) {
 		fmt.println("Pressed E LayerOne")
-		ingest_key(input, .E)
-	 }
+	}
 }
 
 _update :: proc(delta: f32) {
