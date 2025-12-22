@@ -1,15 +1,29 @@
 package main
 
+import "base:runtime"
+
 WindowAPI :: struct {
 	close: proc(window: ^Window),
 	process_events: proc(window: ^Window),
 	get_events: proc(window: ^Window) -> []Event,
 	clear_events: proc(window: ^Window),
+	get_window_handle: proc(window: ^Window) -> WindowHandle,
 }
+
+WindowHandle :: distinct uintptr
 
 Window :: struct {
 	using api : WindowAPI,
 	platform: Platform,
+	
+	ctx: runtime.Context,
+	events: [dynamic]Event,
+	width: int,
+	height: int,
+	title: string,
+	did_resize: bool,
+	is_visible: bool,
+	is_minimized: bool,
 }
 
 WindowFlag :: enum {
@@ -43,6 +57,9 @@ Event :: union {
 
 	WindowDidBecomeKey,
 	WindowDidResignKey,
+
+	WindowBecameVisibleEvent,
+	WindowBecameHiddenEvent,
 }
 
 WindowEventCloseRequested :: struct {}
@@ -67,3 +84,6 @@ WindowMoveEvent :: struct { x, y: int }
 
 WindowDidBecomeKey :: struct { }
 WindowDidResignKey :: struct { }
+
+WindowBecameVisibleEvent :: struct {}
+WindowBecameHiddenEvent :: struct {}

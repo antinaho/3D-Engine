@@ -12,11 +12,37 @@ frag_shader_code :: #load("shaders/frag.spv")
 model :: "viking_room.obj"
 model_tex :: "viking_room.png"
 
+Vertex :: struct #align(16) {
+    position: [4]f32,
+    color: [4]f32,
+    texture_coordinate: [2]f32,
+}
+
+Transformation :: struct {
+	model: alg.Matrix4x4f32,
+	view: alg.Matrix4x4f32,
+	pesprective: alg.Matrix4x4f32,
+}
+
+
+import "core:math"
+import "core:math/linalg"
+matrix_perspective_right_hand :: proc(nearZ, farZ, aspect, fovy_rad: f32) -> linalg.Matrix4x4f32 {
+	ys := 1.0 / math.tan_f32(fovy_rad * 0.5)
+	xs := ys / aspect
+	zs := farZ / (nearZ - farZ)
+	return linalg.Matrix4x4f32 {
+		xs, 0, 0, 0,
+		0, ys, 0, 0,
+		0, 0,  zs, nearZ * zs,
+		0, 0, -1, 0
+	}
+}
+
+import alg "core:math/linalg"
+
 @(private="file")
 application: ^Application
-
-//window: WindowInterface
-renderer: RendererInterface
 
 WindowInput :: struct {
 	keys_press_started: #sparse [KeyboardKey]bool,
@@ -25,7 +51,7 @@ WindowInput :: struct {
 }
 
 ApplicationWindow :: struct {
-	window: Window,
+	window: ^Window,
 	close_requested: bool,
 	is_main_window: bool,
 
@@ -37,9 +63,6 @@ Application :: struct {
 	ctx: runtime.Context,
 
 	windows: [dynamic]ApplicationWindow,
-
-	renderer_state: rawptr,
-	renderer_interface: RendererInterface,	
 }
 
 init :: proc(width, height: int, title: string, allocator := context.allocator, loc := #caller_location) -> ^Application {
@@ -50,44 +73,23 @@ init :: proc(width, height: int, title: string, allocator := context.allocator, 
 	application.windows = make([dynamic]ApplicationWindow)
 	
 	when ODIN_OS == .Darwin {
-		append(&application.windows, ApplicationWindow{ is_main_window=true, window=window_create_mac(width, height, title, application.ctx, allocator, {.MainWindow})^ })
+		append(&application.windows, ApplicationWindow{ is_main_window=true, window=window_create_mac(width, height, title, application.ctx, allocator, {.MainWindow}) })
+		
 	} else {
 		log.panic("Only works on Mac")
 	}
 
 	append(&application.windows[0].layers, ExampleLayer)
+	application.windows[0].layers[0].renderer = metal_init(application.windows[0].window)
+	application.windows[0].layers[0].renderer.clear_color = APINK
 
-	append(&application.windows, ApplicationWindow{ is_main_window=false, window=window_create_mac(width, height, title, application.ctx, allocator, {})^ })
-
-
-	// wsi: WSI
-	// when ODIN_OS == .Darwin {
-	// 	application.renderer_interface = RENDERER_METAL
-	// } else {
-	// 	log.panic("not supported renderer")
-	// }
-
-// when RENDERER_KIND == "Vulkan" {
-// 	application.renderer_interface = RENDERER_VULKAN
-// 	when ODIN_OS == .Darwin { wsi = VULKAN_WSI_MAC }
-// } else {
-// 	log.panic("Not supported renderer")
-// }
-
-	// renderer_config_alloc_error: runtime.Allocator_Error
-	// application.renderer_state, renderer_config_alloc_error = mem.alloc(application.renderer_interface.config_size(), allocator = allocator)
-	// log.assertf(renderer_config_alloc_error == nil, "Failed allocating renderer config: %v", renderer_config_alloc_error)
-
-	// application.renderer_interface.init(wsi, application.renderer_state)
-	// renderer = application.renderer_interface
-	
 	return application
 }
 
 close_requested :: proc() -> bool {
-	#reverse for &aw, i in application.windows {
+	#reverse for &aw, i in application.windows {		
 		if !aw.is_main_window && aw.close_requested {
-			aw.window.close(&aw.window)
+			aw.window.close(aw.window)
 			ordered_remove(&application.windows, i)
 		}
 
@@ -103,14 +105,14 @@ update_window :: proc(aw: ^ApplicationWindow) {
 	aw.keys_press_started = {}
 	aw.keys_released = {}
 
-	aw.window.process_events(&aw.window)
-
-	events := aw.window.get_events(&aw.window)
+	aw.window.process_events(aw.window)
+	
+	events := aw.window.get_events(aw.window)
 
 	for &event in events {
 		switch &e in event {
 			case WindowEventCloseRequested:
-				aw.close_requested = true
+				aw.close_requested = true				
 			case KeyPressedEvent:
 				aw.keys_press_started[e.key] = aw.keys_held[e.key] ~ true
 				aw.keys_held[e.key] = true
@@ -118,17 +120,21 @@ update_window :: proc(aw: ^ApplicationWindow) {
 				aw.keys_released[e.key] = true
 				aw.keys_held[e.key] = false
 			case WindowResizeEvent:
-				fmt.println("LOL")
+				aw.window.did_resize = true
+
 			case WindowMinimizeStartEvent:
-				fmt.println("Smol")
+				aw.window.is_minimized = true
 			case WindowMinimizeEndEvent:
-				fmt.println("BIG")
+				aw.window.is_minimized = false
+
+			case WindowBecameVisibleEvent:
+				aw.window.is_visible = true
+			case WindowBecameHiddenEvent:
+				aw.window.is_visible = false
+			
 			case WindowEnterFullscreenEvent:
-				fmt.println("WOW")
 			case WindowExitFullscreenEvent:
-				fmt.println("we so back")
 			case WindowMoveEvent:
-				fmt.println("chill--", aw.is_main_window)
 			case WindowDidBecomeKey:
 			case WindowDidResignKey:
 			case MousePressedEvent:
@@ -142,10 +148,11 @@ update_window :: proc(aw: ^ApplicationWindow) {
 		if layer.ingest_events != nil { layer.ingest_events(aw) }
 	}
 
-	aw.window.clear_events(&aw.window)
+	aw.window.clear_events(aw.window)
 
 	for layer in aw.layers {
 		if layer.update != nil { layer.update(delta) }
+		if layer.renderer != nil { layer.renderer.draw(aw.window, layer.renderer) }
 	}
 }
 
@@ -167,6 +174,7 @@ _update :: proc(delta: f32) {
 Layer :: struct {
 	update: proc(delta: f32),
 	ingest_events: proc(input: ^WindowInput),
+	renderer: ^Renderer,
 }
 
 main :: proc() {
@@ -184,14 +192,13 @@ main :: proc() {
 	for !close_requested() {
 		free_all(context.temp_allocator)
 		delta = f32(time.duration_seconds(time.tick_since(prev_time)))
+		runtime_app += delta
 		prev_time = time.tick_now()
 		
 		#reverse for &aw in application.windows {
 
 			update_window(&aw)
 		}
-		
-		//renderer.draw()
 	}
 
 	//renderer.cleanup()
@@ -199,13 +206,9 @@ main :: proc() {
 	//free(application)
 }
 
+runtime_app: f32
 delta: f32
 prev_time := time.tick_now()
-
-ingest_key :: proc(input: ^WindowInput, key: KeyboardKey) {
-	input.keys_press_started[key] = false
-	input.keys_held[key] = false
-}
 
 key_went_down :: proc(input: ^WindowInput, key: KeyboardKey) -> bool {
 	return input.keys_press_started[key]

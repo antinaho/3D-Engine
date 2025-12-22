@@ -28,13 +28,6 @@ UniformBufferObject :: struct #align(16) {
 	proj: glsl.mat4,
 }
 
-@(private="package")
-RENDERER_VULKAN :: RendererInterface{
-    config_size = vk_config_size,
-    init        = vk_init,
-	draw		= vk_draw,
-	cleanup 	= vk_cleanup,
-}
 
 when ODIN_OS == .Darwin {
 REQUIRED_EXTENSIONS := []cstring {
@@ -194,9 +187,9 @@ vk_config_size :: proc() -> int {
     return size_of(VulkanRendererState)
 }
 
-vk_init :: proc(wsi: WSI, renderer_state: rawptr) -> rawptr {
+vk_init :: proc(renderer_state: rawptr) -> rawptr {
 	state = cast(^VulkanRendererState)renderer_state
-    vk_wsi := wsi.(VulkanWSI)
+    vk_wsi: VulkanWSI
 
 	state.start_time = time.now()
 
