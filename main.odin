@@ -16,14 +16,8 @@ Vertex :: struct #align(16) {
     position: [4]f32,
     color: [4]f32,
     texture_coordinate: [2]f32,
+	normal: [3]f32,
 }
-
-Transformation :: struct {
-	model: alg.Matrix4x4f32,
-	view: alg.Matrix4x4f32,
-	pesprective: alg.Matrix4x4f32,
-}
-
 
 import "core:math"
 import "core:math/linalg"
@@ -75,13 +69,13 @@ init :: proc(width, height: int, title: string, allocator := context.allocator, 
 	when ODIN_OS == .Darwin {
 		append(&application.windows, ApplicationWindow{ is_main_window=true, window=window_create_mac(width, height, title, application.ctx, allocator, {.MainWindow}) })
 		
+		append(&application.windows[0].layers, ExampleLayer)
+		application.windows[0].layers[0].renderer = metal_init(application.windows[0].window)
+		application.windows[0].layers[0].renderer.clear_color = DARKPURP
 	} else {
 		log.panic("Only works on Mac")
 	}
 
-	append(&application.windows[0].layers, ExampleLayer)
-	application.windows[0].layers[0].renderer = metal_init(application.windows[0].window)
-	application.windows[0].layers[0].renderer.clear_color = APINK
 
 	return application
 }

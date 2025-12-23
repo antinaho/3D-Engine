@@ -20,7 +20,7 @@ load_texture :: proc(renderer: ^Renderer, filepath: string) -> Texture {
 
     texture: Texture
     w, h, c: i32
-    //stbi.set_flip_vertically_on_load(1)
+
     pixels := stbi.load(strings.clone_to_cstring(filepath, context.temp_allocator), &w, &h, &c, 4)
     assert(pixels != nil, "Cnat load")
 
@@ -102,18 +102,29 @@ metal_init :: proc(window: ^Window) -> ^Renderer {
     metalWindow->setBackgroundColor(nil)
     metalWindow->contentView()->setWantsLayer(true)
 
-    { // Triangle to buffer  
-        cube_mesh := create_cube_mesh(platform)
+    { // Triangle to buffer 
 
-        for i in 1..<10 {
-            append(&models, ModelM{
-                mesh = cube_mesh,
-                position={0,0,-1},
-                scale={1.0 * 1.0/f32(i), 1.0 * 1.0/f32(i), 1.0 * 1.0/f32(i)},
-                rotation_angle=0,
-                rotation_axis={0,1,0},
-            })
+
+        for i in 1..=5 {
+            DrawPrimitive(platform, .Cube, {0,0,-1}, {0,1,0}, 1)
         }
+
+        for i in 1..=2 {
+            DrawPrimitive(platform, .Cube, {0,0,-1}, {0,1,0}, 0.2)
+        }
+
+
+        // cube_mesh := create_cube_mesh(platform)
+
+        // for i in 1..<10 {
+        //     append(&models, ModelM{
+        //         mesh = cube_mesh,
+        //         position={0,0,-1},
+        //         scale={1.0 * 1.0/f32(i), 1.0 * 1.0/f32(i), 1.0 * 1.0/f32(i)},
+        //         rotation_angle=0,
+        //         rotation_axis={0,1,0},
+        //     })
+        // }
 
         grass_tex = load_texture(renderer, "textures/candy.jpg")
     }
@@ -207,9 +218,15 @@ metal_init :: proc(window: ^Window) -> ^Renderer {
     
     platform.metalDrawable = platform.swapchain->nextDrawable()
 
+    lighting_buffer = platform.device->newBuffer(
+        size_of(LightingData),
+        MTL.ResourceStorageModeShared
+    )
+
+
     return renderer
 }
-
+lighting_buffer :^MTL.Buffer
 create_depth_and_msaa_textures :: proc(platform: ^MetalPlatform) {
     msaa_texture_descriptor := NS.new(MTL.TextureDescriptor)
     msaa_texture_descriptor->setTextureType(.Type2DMultisample)
@@ -232,6 +249,105 @@ create_depth_and_msaa_textures :: proc(platform: ^MetalPlatform) {
     defer depth_texture_descriptor->release()
 
     platform.depth_texture = platform.device->newTexture(depth_texture_descriptor);
+}
+
+AssetLibrary :: struct {
+    primitive_meshes: map[Primitive]^Mesh,
+}
+asset_library: AssetLibrary
+
+DrawPrimitive :: proc(platform: ^MetalPlatform, primitive: Primitive, position, rotation, scale: [3]f32) {
+    mesh := GetPrimitiveMesh(platform, primitive)
+
+    model := ModelM {
+        mesh = mesh,
+        position = position,
+        rotation_axis = rotation,
+        scale = scale,
+    }
+
+    append(&models, model)
+}
+
+GetPrimitiveMesh :: proc(platform: ^MetalPlatform, primitive: Primitive) -> ^Mesh {
+
+    if primitive in asset_library.primitive_meshes {
+        return asset_library.primitive_meshes[primitive]
+    }
+
+    mesh := new(Mesh)
+
+    #partial switch primitive {
+        case .Cube:
+            mesh.vertex_buffer = platform.device->newBufferWithSlice(CUBE_VERTICES, MTL.ResourceStorageModeShared)
+            mesh.vertex_count = u32(len(CUBE_VERTICES))
+    }
+    
+    asset_library.primitive_meshes[primitive] = mesh
+    
+    return mesh
+}
+
+CUBE_VERTICES :: []Vertex {
+     // Front face (normal pointing towards +Z)
+    {{-0.5, -0.5,  0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 0,  0,  1}},  // 0
+    {{ 0.5, -0.5,  0.5, 1.0}, {1, 1, 1, 1}, {1.0, 0.0}, { 0,  0,  1}},  // 1
+    {{ 0.5,  0.5,  0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 0,  0,  1}},  // 2
+    {{ 0.5,  0.5,  0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 0,  0,  1}},  // 3
+    {{-0.5,  0.5,  0.5, 1.0}, {1, 1, 1, 1}, {0.0, 1.0}, { 0,  0,  1}},  // 4
+    {{-0.5, -0.5,  0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 0,  0,  1}},  // 5
+
+    // Back face (normal pointing towards -Z)
+    {{ 0.5, -0.5, -0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 0,  0, -1}},  // 6
+    {{-0.5, -0.5, -0.5, 1.0}, {1, 1, 1, 1}, {1.0, 0.0}, { 0,  0, -1}},  // 7
+    {{-0.5,  0.5, -0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 0,  0, -1}},  // 8
+    {{-0.5,  0.5, -0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 0,  0, -1}},  // 9
+    {{ 0.5,  0.5, -0.5, 1.0}, {1, 1, 1, 1}, {0.0, 1.0}, { 0,  0, -1}},  // 10
+    {{ 0.5, -0.5, -0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 0,  0, -1}},  // 11
+
+    // Left face (normal pointing towards -X)
+    {{-0.5, -0.5, -0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, {-1,  0,  0}},  // 12
+    {{-0.5, -0.5,  0.5, 1.0}, {1, 1, 1, 1}, {1.0, 0.0}, {-1,  0,  0}},  // 13
+    {{-0.5,  0.5,  0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, {-1,  0,  0}},  // 14
+    {{-0.5,  0.5,  0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, {-1,  0,  0}},  // 15
+    {{-0.5,  0.5, -0.5, 1.0}, {1, 1, 1, 1}, {0.0, 1.0}, {-1,  0,  0}},  // 16
+    {{-0.5, -0.5, -0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, {-1,  0,  0}},  // 17
+
+    // Right face (normal pointing towards +X)
+    {{ 0.5, -0.5,  0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 1,  0,  0}},  // 18
+    {{ 0.5, -0.5, -0.5, 1.0}, {1, 1, 1, 1}, {1.0, 0.0}, { 1,  0,  0}},  // 19
+    {{ 0.5,  0.5, -0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 1,  0,  0}},  // 20
+    {{ 0.5,  0.5, -0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 1,  0,  0}},  // 21
+    {{ 0.5,  0.5,  0.5, 1.0}, {1, 1, 1, 1}, {0.0, 1.0}, { 1,  0,  0}},  // 22
+    {{ 0.5, -0.5,  0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 1,  0,  0}},  // 23
+
+    // Top face (normal pointing towards +Y)
+    {{-0.5,  0.5,  0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 0,  1,  0}},  // 24
+    {{ 0.5,  0.5,  0.5, 1.0}, {1, 1, 1, 1}, {1.0, 0.0}, { 0,  1,  0}},  // 25
+    {{ 0.5,  0.5, -0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 0,  1,  0}},  // 26
+    {{ 0.5,  0.5, -0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 0,  1,  0}},  // 27
+    {{-0.5,  0.5, -0.5, 1.0}, {1, 1, 1, 1}, {0.0, 1.0}, { 0,  1,  0}},  // 28
+    {{-0.5,  0.5,  0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 0,  1,  0}},  // 29
+
+    // Bottom face (normal pointing towards -Y)
+    {{-0.5, -0.5, -0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 0, -1,  0}},  // 30
+    {{ 0.5, -0.5, -0.5, 1.0}, {1, 1, 1, 1}, {1.0, 0.0}, { 0, -1,  0}},  // 31
+    {{ 0.5, -0.5,  0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 0, -1,  0}},  // 32
+    {{ 0.5, -0.5,  0.5, 1.0}, {1, 1, 1, 1}, {1.0, 1.0}, { 0, -1,  0}},  // 33
+    {{-0.5, -0.5,  0.5, 1.0}, {1, 1, 1, 1}, {0.0, 1.0}, { 0, -1,  0}},  // 34
+    {{-0.5, -0.5, -0.5, 1.0}, {1, 1, 1, 1}, {0.0, 0.0}, { 0, -1,  0}},  // 35
+
+}
+
+Primitive :: enum {
+    Quad,
+    Cube,
+    Sphere,
+    Cylinder,
+    Circle,
+    Tube,
+    Cone,
+    Torus,
 }
 
 clear_background :: proc(renderer: ^Renderer, color: Color) {
@@ -329,9 +445,56 @@ metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
     aspect_ratio := platform.swapchain->frame().width / platform.swapchain->frame().height
     fov := camera.FOV * (math.PI / 180.0)
     projection_matrix := matrix_perspective_right_hand(camera.near_clip, camera.far_clip, f32(aspect_ratio), fov)
+
+    lighting := LightingData{
+        directional_light = DirectionalLight{
+            direction = linalg.normalize([3]f32{0.3, -1, -0.5}),
+            color = {1.0, 0.95, 0.8},  // Slight warm sun
+            intensity = 1.2,
+        },
+
+        camera_position = camera.position,
+        ambient_color = {0.4, 0.5, 0.6},  // Slight blue ambient
+        ambient_intensity = 0.25,
+    }
+
+    lighting.point_lights[0] = PointLight{
+            position = {
+                1.25,                           // X: static
+                0.2,                           // Y: static  
+                -3 + math.sin(runtime_app) * 4,    // Z: oscillates between -7 and -3
+            },
+            color = {0, 1, 0},  
+            intensity = 3.0,
+            constant = 1.0,
+            linear = 0.09,
+            quadratic = 0.032,
+            radius = 5.0,
+        }
+
+    lighting.point_lights[1] = PointLight{
+            position = {
+                -1.25,                           // X: static
+                0.2,                           // Y: static  
+                -3 - math.sin(runtime_app) * 4,    // Z: oscillates between -7 and -3
+            },
+            color = {0, 0, 1},  
+            intensity = 3.0,
+            constant = 1.0,
+            linear = 0.09,
+            quadratic = 0.032,
+            radius = 5.0,
+        }
     
 
-    for &model, i in models {
+
+    contents := lighting_buffer->contentsAsSlice([]LightingData)[:1]
+    contents[0] = lighting
+
+    render_encoder->setFragmentBuffer(lighting_buffer, 0, 1)
+
+
+    for &model, i in models[:len(models)-2] {
         orbit_radius := f32(1.0) + f32(i) * 0.3  // Orbit gets bigger
         orbit_speed := f32(2.0)
         angle := runtime_app * orbit_speed
@@ -339,15 +502,14 @@ metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
         // Each cube offset in angle (spiral)
         phase_offset := f32(i) * (2 * math.PI / f32(len(models)))
         
-        model.position.x = math.cos(angle + phase_offset) * orbit_radius
+        model.position.x = 0 //math.cos(angle + phase_offset) * orbit_radius
         model.position.y = math.sin(angle + phase_offset) * orbit_radius
         model.position.z = -1.0 - f32(i) * 2.0  // Farther back
         
         // 3. Update rotation (spin around Y-axis)
-        spin_speed := f32(1)  // Radians per second
+        spin_speed := f32(0.1)  // Radians per second
         model.rotation_angle += delta * spin_speed
         model.rotation_axis = {0, 1, 0}  // Spin around Y
-        
         
         model_matrix := 
         linalg.matrix4_translate_f32(model.position) *
@@ -359,17 +521,48 @@ metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
         ubo := Uniforms {
             model_matrix = model_matrix,
             view_matrix = view_matrix,
-            perspective_matrix = projection_matrix,
-            time = runtime_app,
-            delta = delta,
+            projection_matrix = projection_matrix,
+            light_position = {0,0,0,0},
+            light_direction = {0,0,0,0},
+            time_data = {runtime_app, delta, 0, 0},
         }
-        
+
         uniform_bytes := mem.ptr_to_bytes(&ubo)
         
         render_encoder->setVertexBytes(uniform_bytes, 1)
         render_encoder->setVertexBuffer(model.mesh.vertex_buffer, 0, 0)
         render_encoder->setFragmentBytes(uniform_bytes, 0)
+        render_encoder->setFragmentTexture(grass_tex.mtl_tex, 0)
 
+        render_encoder->setFragmentSamplerState(platform.texture_sampler, 0)
+
+        render_encoder->drawPrimitives(.Triangle, 0, NS.UInteger(model.mesh.vertex_count))
+    }
+
+    for &model, i in models[len(models)-2:] {
+        model.position = lighting.point_lights[i].position
+
+        model_matrix := 
+            linalg.matrix4_translate_f32(model.position) *
+            linalg.matrix4_rotate_f32(model.rotation_angle, model.rotation_axis) *
+            linalg.matrix4_scale_f32(model.scale)
+            
+        translation_matrix := linalg.matrix4_translate_f32(linalg.Vector3f32{0,0, -1.0})
+        
+        ubo := Uniforms {
+            model_matrix = model_matrix,
+            view_matrix = view_matrix,
+            projection_matrix = projection_matrix,
+            light_position = {0,0,0,0},
+            light_direction = {0,0,0,0},
+            time_data = {runtime_app, delta, 0, 0},
+        }
+
+        uniform_bytes := mem.ptr_to_bytes(&ubo)
+        
+        render_encoder->setVertexBytes(uniform_bytes, 1)
+        render_encoder->setVertexBuffer(model.mesh.vertex_buffer, 0, 0)
+        render_encoder->setFragmentBytes(uniform_bytes, 0)
         render_encoder->setFragmentTexture(grass_tex.mtl_tex, 0)
 
         render_encoder->setFragmentSamplerState(platform.texture_sampler, 0)
@@ -386,68 +579,6 @@ metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
 }
 
 models: [dynamic]ModelM
-// models := [?]ModelM {
-//     {position={0,0,-1}, scale={1, 1, 1}, rotation_angle=0, rotation_axis={0,1,0}},
-// }
-
-create_cube_mesh :: proc(platform: ^MetalPlatform) -> ^Mesh {
-    vertices := [?]Vertex {
-        {{-0.5, -0.5, 0.5, 1.0}, {1,1,1,1}, {0.0, 0.0}},
-        {{0.5, -0.5, 0.5, 1.0},  {1,1,1,1}, {1.0, 0.0}},
-        {{0.5, 0.5, 0.5, 1.0},   {1,1,1,1}, {1.0, 1.0}},
-        {{0.5, 0.5, 0.5, 1.0},   {1,1,1,1}, {1.0, 1.0}},
-        {{-0.5, 0.5, 0.5, 1.0},  {1,1,1,1}, {0.0, 1.0}},
-        {{-0.5, -0.5, 0.5, 1.0}, {1,1,1,1}, {0.0, 0.0}},
-
-        // Back face
-        {{0.5, -0.5, -0.5, 1.0}, {1,1,1,1},{0.0, 0.0}},
-        {{-0.5, -0.5, -0.5, 1.0}, {1,1,1,1},{1.0, 0.0}},
-        {{-0.5, 0.5, -0.5, 1.0}, {1,1,1,1},{1.0, 1.0}},
-        {{-0.5, 0.5, -0.5, 1.0}, {1,1,1,1},{1.0, 1.0}},
-        {{0.5, 0.5, -0.5, 1.0}, {1,1,1,1},{0.0, 1.0}},
-        {{0.5, -0.5, -0.5, 1.0},{1,1,1,1}, {0.0, 0.0}},
-
-        // Top face
-        {{-0.5, 0.5, 0.5, 1.0},{1,1,1,1}, {0.0, 0.0}},
-        {{0.5, 0.5, 0.5, 1.0}, {1,1,1,1},{1.0, 0.0}},
-        {{0.5, 0.5, -0.5, 1.0},{1,1,1,1}, {1.0, 1.0}},
-        {{0.5, 0.5, -0.5, 1.0}, {1,1,1,1},{1.0, 1.0}},
-        {{-0.5, 0.5, -0.5, 1.0},{1,1,1,1}, {0.0, 1.0}},
-        {{-0.5, 0.5, 0.5, 1.0},{1,1,1,1}, {0.0, 0.0}},
-
-        // Bottom face
-        {{-0.5, -0.5, -0.5, 1.0},{1,1,1,1}, {0.0, 0.0}},
-        {{0.5, -0.5, -0.5, 1.0},{1,1,1,1}, {1.0, 0.0}},
-        {{0.5, -0.5, 0.5, 1.0}, {1,1,1,1},{1.0, 1.0}},
-        {{0.5, -0.5, 0.5, 1.0}, {1,1,1,1},{1.0, 1.0}},
-        {{-0.5, -0.5, 0.5, 1.0},{1,1,1,1}, {0.0, 1.0}},
-        {{-0.5, -0.5, -0.5, 1.0},{1,1,1,1}, {0.0, 0.0}},
-
-        // Left face
-        {{-0.5, -0.5, -0.5, 1.0}, {1,1,1,1},{0.0, 0.0}},
-        {{-0.5, -0.5, 0.5, 1.0},{1,1,1,1}, {1.0, 0.0}},
-        {{-0.5, 0.5, 0.5, 1.0},{1,1,1,1}, {1.0, 1.0}},
-        {{-0.5, 0.5, 0.5, 1.0},{1,1,1,1}, {1.0, 1.0}},
-        {{-0.5, 0.5, -0.5, 1.0}, {1,1,1,1},{0.0, 1.0}},
-        {{-0.5, -0.5, -0.5, 1.0},{1,1,1,1},{0.0, 0.0}},
-
-        // Right face
-        {{0.5, -0.5, 0.5, 1.0},{1,1,1,1}, {0.0, 0.0}},
-        {{0.5, -0.5, -0.5, 1.0},{1,1,1,1}, {1.0, 0.0}},
-        {{0.5, 0.5, -0.5, 1.0},{1,1,1,1}, {1.0, 1.0}},
-        {{0.5, 0.5, -0.5, 1.0}, {1,1,1,1},{1.0, 1.0}},
-        {{0.5, 0.5, 0.5, 1.0},{1,1,1,1}, {0.0, 1.0}},
-        {{0.5, -0.5, 0.5, 1.0}, {1,1,1,1},{0.0, 0.0}},
-    }
-
-    vertex_buffer := platform.device->newBufferWithSlice(vertices[:], MTL.ResourceStorageModeShared)
-    
-    mesh := new(Mesh)
-    mesh.vertex_buffer = vertex_buffer
-    mesh.vertex_count = len(vertices)
-        
-    return mesh
-}
 
 
 Mesh :: struct {
@@ -455,6 +586,7 @@ Mesh :: struct {
     vertex_count: u32,
     index_buffer: ^MTL.Buffer,
     index_count: u32,
+    ref_count: int,
 }
 
 ModelM :: struct {
@@ -467,21 +599,64 @@ ModelM :: struct {
 import "core:mem"
 
 Uniforms :: struct #align(16) {
-    perspective_matrix: linalg.Matrix4x4f32,
+    projection_matrix: linalg.Matrix4x4f32,
     view_matrix: linalg.Matrix4x4f32,
     model_matrix: linalg.Matrix4x4f32,
-    time: f32,
-    delta: f32,
-    _padding: [2]f32,
+    
+    light_position: [4]f32,
+    light_direction: [4]f32,
+    time_data: [4]f32,
 }
 
-#assert(size_of(Uniforms) == 208)
-#assert(offset_of(Uniforms, perspective_matrix) == 0)
-#assert(offset_of(Uniforms, view_matrix) == 64)
-#assert(offset_of(Uniforms, model_matrix) == 128)
-#assert(offset_of(Uniforms, time) == 192)
-#assert(offset_of(Uniforms, delta) == 196)
-#assert(offset_of(Uniforms, _padding) == 200)
+// Directional light (sun, moon)
+DirectionalLight :: struct #align(16) {
+    direction: [3]f32,  // Direction the light points
+    _: f32,
+    color: [3]f32,      // RGB color
+    _: f32,
+    intensity: f32,           // Brightness multiplier
+    _: [3]f32,
+}
+
+// Point light (lamp, torch)
+PointLight :: struct #align(16) {
+    position: [3]f32,
+    _: f32,
+    color: [3]f32,
+    _: f32,
+
+    intensity: f32,
+    constant: f32,    // Usually 1.0
+    linear: f32,      // Usually 0.09
+    quadratic: f32,   // Usually 0.032
+    
+    radius: f32,      // Max distance
+    _: [3]f32,
+}
+
+// Lighting data to pass to shaders
+LightingData :: struct #align(16) {
+    // Directional lights
+    point_lights: [16]PointLight,
+    directional_light: DirectionalLight,
+
+    //point_light: PointLight,
+
+    
+    // Camera/view position for specular
+    camera_position: [3]f32,
+    _: f32,
+    
+    // Ambient lighting
+    ambient_color: [3]f32,
+    _: f32,
+    ambient_intensity: f32,
+}
+
+
+
+
+
 
 import "core:math"
 import "core:math/rand"

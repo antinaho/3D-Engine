@@ -16,6 +16,8 @@ Color :: [4]u8
 PINK :: Color {255, 203, 196, 255}
 PEACH :: Color {255, 203, 165, 255}
 APINK :: Color {255, 152, 153, 255}
+DARKPURP :: Color {30, 25, 35, 255}
+
 
 Camera :: struct {
     position: [3]f32,
