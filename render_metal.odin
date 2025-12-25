@@ -49,6 +49,30 @@ load_texture :: proc(renderer: ^Renderer, filepath: string) -> Texture {
 MetalAPI :: RendererAPI {
     draw = metal_draw,
     clear_background = clear_background,
+    cleanup = _cleanup,
+}
+
+_cleanup :: proc(window: ^Window, renderer: ^Renderer) {
+    platform := cast(^MetalPlatform)renderer.platform
+
+    platform.msaa_render_target_texture->release()
+    platform.depth_texture->release()
+    platform.renderPassDescriptor->release()
+    platform.swapchain->release()
+
+    
+    for _, value in asset_library.primitive_meshes {
+        free(value)
+    }
+    delete(asset_library.primitive_meshes)
+
+    delete(models)
+    grass_tex.mtl_tex->release()
+
+    platform.device->release()
+
+    free(platform)
+    free(renderer)
 }
 
 MetalPlatform :: struct {
@@ -75,9 +99,6 @@ MSAA_SAMPLE_COUNT :: 4
 
 grass_tex: Texture
 
-
-
-import "core:slice"
 
 shader_code :: #load("shaders/shaders.metal")
 
@@ -112,19 +133,6 @@ metal_init :: proc(window: ^Window) -> ^Renderer {
         for i in 1..=2 {
             DrawPrimitive(platform, .Cube, {0,0,-1}, {0,1,0}, 0.2)
         }
-
-
-        // cube_mesh := create_cube_mesh(platform)
-
-        // for i in 1..<10 {
-        //     append(&models, ModelM{
-        //         mesh = cube_mesh,
-        //         position={0,0,-1},
-        //         scale={1.0 * 1.0/f32(i), 1.0 * 1.0/f32(i), 1.0 * 1.0/f32(i)},
-        //         rotation_angle=0,
-        //         rotation_axis={0,1,0},
-        //     })
-        // }
 
         grass_tex = load_texture(renderer, "textures/candy.jpg")
     }
@@ -492,7 +500,6 @@ metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
     contents[0] = lighting
 
     render_encoder->setFragmentBuffer(lighting_buffer, 0, 1)
-
 
     for &model, i in models[:len(models)-2] {
         orbit_radius := f32(1.0) + f32(i) * 0.3  // Orbit gets bigger

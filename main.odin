@@ -26,10 +26,10 @@ matrix_perspective_right_hand :: proc(nearZ, farZ, aspect, fovy_rad: f32) -> lin
 	xs := ys / aspect
 	zs := farZ / (nearZ - farZ)
 	return linalg.Matrix4x4f32 {
-		xs, 0, 0, 0,
-		0, ys, 0, 0,
-		0, 0,  zs, nearZ * zs,
-		0, 0, -1, 0
+		xs,	0,	0,	0,
+		0,	ys,	0,	0,
+		0,	0,	zs,	nearZ * zs,
+		0,	0,	-1,	0
 	}
 }
 
@@ -47,7 +47,8 @@ WindowInput :: struct {
 ApplicationWindow :: struct {
 	window: ^Window,
 	close_requested: bool,
-	is_main_window: bool,
+	flags: WindowFlags,
+	renderer: ^Renderer,
 
 	using _ : WindowInput,
 	layers: [dynamic]Layer,
@@ -55,39 +56,53 @@ ApplicationWindow :: struct {
 
 Application :: struct {
 	ctx: runtime.Context,
-
 	windows: [dynamic]ApplicationWindow,
 }
 
 init :: proc(width, height: int, title: string, allocator := context.allocator, loc := #caller_location) -> ^Application {
 	if application != nil do log.panic("Trying to create more than one application")
 
-	application = new(Application, context.allocator, loc)
+	application = new(Application, allocator, loc)
 	application.ctx = context
 	application.windows = make([dynamic]ApplicationWindow)
 	
-	when ODIN_OS == .Darwin {
-		append(&application.windows, ApplicationWindow{ is_main_window=true, window=window_create_mac(width, height, title, application.ctx, allocator, {.MainWindow}) })
-		
-		append(&application.windows[0].layers, ExampleLayer)
-		application.windows[0].layers[0].renderer = metal_init(application.windows[0].window)
-		application.windows[0].layers[0].renderer.clear_color = DARKPURP
-	} else {
-		log.panic("Only works on Mac")
+	return application
+}
+
+
+
+create_window :: proc(width, height: int, title: string, allocator: runtime.Allocator, flags := WindowFlags{}) -> ^ApplicationWindow {
+	
+	window := window_create_mac(width, height, title, allocator, flags)
+	renderer := metal_init(window)
+
+	application_window := ApplicationWindow {
+		window = window,
+		flags = flags,
+		renderer = renderer,
+		layers = make([dynamic]Layer, allocator)
 	}
 
+	renderer.clear_color = DARKPURP
 
-	return application
+	append(&application.windows, application_window)
+	
+	return &application.windows[len(application.windows) - 1]
+}
+
+add_layer :: proc(application_window: ^ApplicationWindow, layer: Layer) {
+	append(&application_window.layers, layer)
 }
 
 close_requested :: proc() -> bool {
 	#reverse for &aw, i in application.windows {		
-		if !aw.is_main_window && aw.close_requested {
+		if .MainWindow not_in aw.flags && aw.close_requested {
+			aw.renderer.cleanup(aw.window, aw.renderer)
 			aw.window.close(aw.window)
 			ordered_remove(&application.windows, i)
 		}
 
-		if aw.is_main_window && aw.close_requested {
+		if .MainWindow in aw.flags && aw.close_requested {
 			return true
 		}
 	}
@@ -139,50 +154,32 @@ update_window :: proc(aw: ^ApplicationWindow) {
 	}
 
 	#reverse for &layer in aw.layers {
-		if layer.ingest_events != nil { layer.ingest_events(aw) }
+		if layer.ingest_events != nil { 
+			layer.ingest_events(aw) 
+		}
 	}
 
 	aw.window.clear_events(aw.window)
 
 	for layer in aw.layers {
-		if layer.update != nil { layer.update(delta) }
-		if layer.renderer != nil { layer.renderer.draw(aw.window, layer.renderer) }
+		if layer.update != nil { 
+			layer.update(delta) 
+		}
+		if aw.renderer != nil { 
+			
+			aw.renderer.draw(aw.window, aw.renderer) 
+		}
 	}
 }
 
-ExampleLayer :: Layer {
-	ingest_events = _events,
-	update = _update,
-}
 
-_events :: proc(input: ^WindowInput) {
-	if key_went_down(input, .E) {
-		fmt.println("Pressed E LayerOne")
-	}
-}
-
-_update :: proc(delta: f32) {
-
-}
 
 Layer :: struct {
 	update: proc(delta: f32),
 	ingest_events: proc(input: ^WindowInput),
-	renderer: ^Renderer,
 }
 
-main :: proc() {
-	// default_allocator := context.allocator
-	// tracking_allocator: mem.Tracking_Allocator
-	// mem.tracking_allocator_init(&tracking_allocator, default_allocator)
-	// context.allocator = mem.tracking_allocator(&tracking_allocator)
-	// defer reset_tracking_allocator(&tracking_allocator)
-
-	context.logger = log.create_console_logger()
-	defer log.destroy_console_logger(context.logger)
-
-	init(1280, 720, "Hellope")
-
+run :: proc() {
 	for !close_requested() {
 		free_all(context.temp_allocator)
 		delta = f32(time.duration_seconds(time.tick_since(prev_time)))
@@ -194,10 +191,16 @@ main :: proc() {
 			update_window(&aw)
 		}
 	}
+	
+	for &aw in application.windows {
+		delete(aw.layers)
+		aw.renderer.cleanup(aw.window, aw.renderer)
+		aw.window.close(aw.window)
+	}
 
-	//renderer.cleanup()
-	//window.shutdown()	
-	//free(application)
+	delete(application.windows)
+
+	free(application)
 }
 
 runtime_app: f32
@@ -367,7 +370,3 @@ KeyboardKey :: enum {
 	JIS_Kana			= 0x7C,
 	ISO_Section			= 0x7D,
 }
-
-
-
-

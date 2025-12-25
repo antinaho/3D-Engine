@@ -9,6 +9,7 @@ Renderer :: struct {
 RendererAPI :: struct {
     draw: proc(window: ^Window, renderer: ^Renderer),
     clear_background: proc(renderer: ^Renderer, color: Color),
+    cleanup: proc(window: ^Window, renderer: ^Renderer),
 }
 
 Color :: [4]u8

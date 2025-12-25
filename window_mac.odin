@@ -66,10 +66,15 @@ _mac_get_window_handle :: proc(w: ^Window) -> WindowHandle {
 
 _mac_close_window :: proc(w: ^Window) {
 	platform := cast(^MacPlatform)w.platform
+	
+	delete(w.events)
 	platform.window->close()
+
+	free(platform)
+	free(w)
 }
 
-window_create_mac :: proc(width, height: int, title: string, ctx: runtime.Context, allocator: runtime.Allocator, flags: WindowFlags) -> ^Window {
+window_create_mac :: proc(width, height: int, title: string, allocator: runtime.Allocator, flags: WindowFlags) -> ^Window {
 	window := new(Window)
 	platform := new(MacPlatform)
 
