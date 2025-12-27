@@ -13,10 +13,16 @@ model :: "viking_room.obj"
 model_tex :: "viking_room.png"
 
 Vertex :: struct #align(16) {
-    position: [4]f32,
-    color: [4]f32,
-    texture_coordinate: [2]f32,
+    position: [3]f32,
+	_: f32,
+
 	normal: [3]f32,
+	_: f32,
+
+    color: [4]f32,
+	
+	uvs: [2]f32,
+	_: [2]f32,
 }
 
 import "core:math"
@@ -49,11 +55,12 @@ ApplicationWindow :: struct {
 	close_requested: bool,
 	flags: WindowFlags,
 	renderer: ^Renderer,
+	
 
 	using _ : WindowInput,
 	layers: [dynamic]Layer,
 }
-
+cmd_buffer: Command_Buffer
 Application :: struct {
 	ctx: runtime.Context,
 	windows: [dynamic]ApplicationWindow,
@@ -68,8 +75,6 @@ init :: proc(width, height: int, title: string, allocator := context.allocator, 
 	
 	return application
 }
-
-
 
 create_window :: proc(width, height: int, title: string, allocator: runtime.Allocator, flags := WindowFlags{}) -> ^ApplicationWindow {
 	
@@ -154,6 +159,7 @@ update_window :: proc(aw: ^ApplicationWindow) {
 	}
 
 	#reverse for &layer in aw.layers {
+	
 		if layer.ingest_events != nil { 
 			layer.ingest_events(aw) 
 		}
@@ -161,25 +167,36 @@ update_window :: proc(aw: ^ApplicationWindow) {
 
 	aw.window.clear_events(aw.window)
 
+	cmd_buffer = init_command_buffer()
+    defer destroy_command_buffer(&cmd_buffer)
+
 	for layer in aw.layers {
 		if layer.update != nil { 
 			layer.update(delta) 
 		}
-		if aw.renderer != nil { 
-			
-			aw.renderer.draw(aw.window, aw.renderer) 
-		}
+	}
+
+	if aw.renderer != nil {
+		
+		aw.renderer.draw(aw.window, aw.renderer) 
 	}
 }
-
-
 
 Layer :: struct {
 	update: proc(delta: f32),
 	ingest_events: proc(input: ^WindowInput),
 }
 
+render_pass_3d: Renderer_3D
+
 run :: proc() {
+
+	render_pass_3d = init_renderer_3d(1280, 720)
+	defer destroy_renderer_3d(&render_pass_3d)
+
+	b = init_buffer_with_size(size_of(Vertex) * len(TriangleVertices), .Vertex, .Static)
+	fill_buffer(&b, raw_data(TriangleVertices[:]), size_of(Vertex) * len(TriangleVertices))
+
 	for !close_requested() {
 		free_all(context.temp_allocator)
 		delta = f32(time.duration_seconds(time.tick_since(prev_time)))

@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:log"
 import "core:mem"
 
-ExampleLayer :: Layer {
+ExampleLayer := Layer {
 	ingest_events = _events,
 	update = _update,
 }
@@ -15,7 +15,32 @@ _events :: proc(input: ^WindowInput) {
 	}
 }
 
+b: Buffer
+
+
 _update :: proc(delta: f32) {
+
+    cmd_update_renderpass_descriptors(&cmd_buffer, Update_Renderpass_Desc{
+        renderpass_descriptor=render_pass_3d.renderpass_descriptor,
+        msaa_texture = render_pass_3d.msaa_color_texture,
+        depth_texture = render_pass_3d.depth_texture,
+    })
+
+    cmd_begin_pass(&cmd_buffer, "Test", {0.0,0.0,0.0,1}, render_pass_3d.msaa_color_texture, render_pass_3d.depth_texture, render_pass_3d.renderpass_descriptor)
+
+    cmd_set_pipeline(&cmd_buffer, render_pass_3d.pipeline)
+
+    //cmd_bind_vertex_buffer(&cmd_buffer, b, 0, 0)
+
+    //cmd_draw(&cmd_buffer, len(TriangleVertices))
+
+    cmd_end_pass(&cmd_buffer)
+}
+
+TriangleVertices := []Vertex {
+    {position={0.0, 0.5, 0}, color={1,1,1,1}, normal={1,1,1}, uvs={1,1}},
+    {position={0.5, -0.5, 0}, color={1,1,1,1}, normal={1,1,1}, uvs={1,1}},
+    {position={-0.5, -0.5, 0}, color={1,1,1,1}, normal={1,1,1}, uvs={1,1}}, 
 }
 
 main :: proc() {
@@ -31,10 +56,10 @@ main :: proc() {
 
     init(1280, 720, "Hellope")
 
-
     app_window := create_window(1280, 720, "Hellope", context.allocator, {.MainWindow})
 
     add_layer(app_window, ExampleLayer)
+
 
     run()
 }

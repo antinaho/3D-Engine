@@ -7,6 +7,7 @@ struct Uniforms {
     float4 lightPosition;
     float4 lightDirection;
     float4 time_data;
+    float4 mat;
 };
 
 struct DirectionalLight {
@@ -133,11 +134,9 @@ vertex VertexOut vertex_main(
     float delta = uniforms.time_data.y;
 
     out.color = in.color;
-    float scroll_speed = 0.1;
-    float offset = rtime * scroll_speed;
-    
-    out.textureCoordinate = 1.0 - in.textureCoordinate;
-    out.textureCoordinate += offset;
+    float2 scale = float2(1.0); // uniforms.mat.zw
+    float2 offset = float2(0.0); // uniforms.mat.xy
+    out.textureCoordinate = 1.0 - (in.textureCoordinate * scale + offset);
 
     float4 world_pos = uniforms.model * in.position;
     out.world_position = world_pos;
@@ -194,3 +193,42 @@ fragment float4 fragment_main(
 
 
 
+
+
+
+
+
+
+struct VM {
+    float3 position;
+    float _pad;
+    float3 normal;
+    float __pad;
+    float4 color;
+    float2 uvs;
+    float2 ___pad;
+};
+
+struct VO {
+    float4 position [[position]];
+    float3 normal;
+    float4 color;
+    float2 uvs;
+};
+
+vertex VO vertex_m(
+    const device VM* vertices [[buffer(0)]],
+    uint vid                  [[vertex_id]]
+) {
+    
+    VO out;
+
+    out.position = float4(vertices[vid].position, 1.0);
+    out.color = float4(1.0);
+    
+    return out;
+}
+
+fragment float4 fragment_m(VO vert [[stage_in]]) {
+    return vert.color;
+}
