@@ -42,13 +42,6 @@ destroy_command_buffer :: proc(cb: ^Command_Buffer) {
 // ===== Render Pass =====
 Begin_Pass_Command :: struct {
     name: string,
-    clear_color: [4]f32,
-    clear_depth: f32,
-    load_action: Load_Action,
-    
-    // Optional: For MSAA
-    msaa_texture: Texture,
-    depth_texture: Texture,
     renderpass_descriptor: rawptr,
 }
 
@@ -108,10 +101,9 @@ Draw_Command :: struct {
 
 Draw_Indexed_Command :: struct {
     index_count: int,
-    instance_count: int,
     first_index: int,
     vertex_offset: int,
-    first_instance: int,
+    index_buffer: Buffer,
 }
 
 Render_Pass_MSAA_Desc :: struct {
@@ -136,14 +128,9 @@ Draw_Mesh_Command :: struct {
 
 // Helper functions to add commands
 
-cmd_begin_pass :: proc(cb: ^Command_Buffer, name: string, clear_color: [4]f32, msa_tex, depth_tex: Texture, renderpass_descriptor: rawptr, clear_depth: f32 = 1.0) {
+cmd_begin_pass :: proc(cb: ^Command_Buffer, name: string, renderpass_descriptor: rawptr) {
     append(&cb.commands, Begin_Pass_Command{
         name = name,
-        clear_color = clear_color,
-        clear_depth = clear_depth,
-        load_action = .Clear,
-        msaa_texture = msa_tex,
-        depth_texture = depth_tex,
         renderpass_descriptor = renderpass_descriptor,
     })
 }
@@ -192,13 +179,12 @@ cmd_draw :: proc(cb: ^Command_Buffer, vertex_count: int) {
     })
 }
 
-cmd_draw_indexed :: proc(cb: ^Command_Buffer, index_count: int, instance_count: int = 1) {
+cmd_draw_indexed :: proc(cb: ^Command_Buffer, index_count: int, index_buffer: Buffer) {
     append(&cb.commands, Draw_Indexed_Command{
         index_count = index_count,
-        instance_count = instance_count,
         first_index = 0,
         vertex_offset = 0,
-        first_instance = 0,
+        index_buffer = index_buffer,
     })
 }
 

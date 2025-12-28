@@ -17,7 +17,7 @@ Texture_Type :: enum {
 Texture_Desc :: struct {
     width: int,
     height: int,
-    depth: int,
+    //depth: int,
     format: Pixel_Format,
     usage: Texture_Usage,
     type: Texture_Type,

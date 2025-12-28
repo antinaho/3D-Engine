@@ -201,9 +201,9 @@ fragment float4 fragment_main(
 
 struct VM {
     float3 position;
-    float _pad;
+ 
     float3 normal;
-    float __pad;
+ 
     float4 color;
     float2 uvs;
     float2 ___pad;
@@ -224,7 +224,7 @@ vertex VO vertex_m(
     VO out;
 
     out.position = float4(vertices[vid].position, 1.0);
-    out.color = float4(1.0);
+    out.color = vertices[vid].color;
     
     return out;
 }

@@ -95,7 +95,7 @@ metal_init :: proc(window: ^Window) -> ^Renderer {
 
     platform.swapchain = CA.MetalLayer.layer()
     platform.swapchain->setDevice(platform.device)
-    platform.swapchain->setPixelFormat(.BGRA8Unorm_sRGB)
+    platform.swapchain->setPixelFormat(.BGRA8Unorm)
     platform.swapchain->setFramebufferOnly(true)
     platform.swapchain->setFrame(metalWindow->frame())
 
@@ -105,18 +105,18 @@ metal_init :: proc(window: ^Window) -> ^Renderer {
     metalWindow->contentView()->setWantsLayer(true)
 
     platform.command_queue = platform.device->newCommandQueue()
-
-    renderer.api = MetalAPI
-    
     platform.metalDrawable = platform.swapchain->nextDrawable()
-
-    g_metal_device = platform.device
-    drawable = platform.metalDrawable
+    
+    renderer.api = MetalAPI
+    state = platform
 
     return renderer
 }
 
-drawable: ^CA.MetalDrawable
+
+@private
+state: ^MetalPlatform
+
 lighting_buffer :^MTL.Buffer
 create_depth_and_msaa_textures :: proc(platform: ^MetalPlatform) {
     // msaa_texture_descriptor := NS.new(MTL.TextureDescriptor)
@@ -209,16 +209,14 @@ color_to_clear_color :: proc(color: Color) -> MTL.ClearColor {
     }
 }
 
-update_render_pass_descriptor :: proc(desc: Update_Renderpass_Desc, platform: ^MetalPlatform) {
+update_render_pass_descriptor :: proc(desc: Update_Renderpass_Desc) {
     pass_desc := cast(^MTL.RenderPassDescriptor)desc.renderpass_descriptor
 
     pass_desc->colorAttachments()->object(0)->setTexture(cast(^MTL.Texture)desc.msaa_texture.handle);
-    pass_desc->colorAttachments()->object(0)->setResolveTexture(drawable->texture());
+    pass_desc->colorAttachments()->object(0)->setResolveTexture(state.metalDrawable->texture());
     pass_desc->depthAttachment()->setTexture(cast(^MTL.Texture)desc.depth_texture.handle);
     
 }
-
-g_metal_device: ^MTL.Device
 
 metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
     NS.scoped_autoreleasepool()
@@ -241,110 +239,7 @@ metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
         return
     }
 
-    execute_commands(platform, &cmd_buffer)
-    
-    
-
-    //update_render_pass_descriptor(platform)
-
-    // // View
-    // R := linalg.Vector3f32{1,0,0} // Unit right
-    // U := linalg.Vector3f32{0, 1, 0} // Unit up
-    // F := linalg.Vector3f32{0, 0, -1} // Unit right
-    // P := camera.position // Camera world space position
-    // view_matrix := linalg.Matrix4x4f32 {
-    //     R.x, R.y, R.z, linalg.dot(-R, P),
-    //     U.x, U.y, U.z, linalg.dot(-U, P),
-    //     -F.x, -F.y, -F.z, linalg.dot(F, P),
-    //     0,0,0,1
-    // }
-
-    // // Projection
-    // aspect_ratio := platform.swapchain->frame().width / platform.swapchain->frame().height
-    // fov := camera.FOV * (math.PI / 180.0)
-    // projection_matrix := matrix_perspective_right_hand(camera.near_clip, camera.far_clip, f32(aspect_ratio), fov)
-
-    // lighting := LightingData{
-    //     directional_light = DirectionalLight{
-    //         direction = linalg.normalize([3]f32{0.3, -1, -0.5}),
-    //         color = {1.0, 0.95, 0.8},  // Slight warm sun
-    //         intensity = 1.2,
-    //     },
-
-    //     camera_position = camera.position,
-    //     ambient_color = {0.4, 0.5, 0.6},  // Slight blue ambient
-    //     ambient_intensity = 0.25,
-    // }
-
-    // lighting.point_lights[0] = PointLight{
-    //         position = {
-    //             1.25,                           // X: static
-    //             0.2,                           // Y: static  
-    //             -3 + math.sin(runtime_app) * 4,    // Z: oscillates between -7 and -3
-    //         },
-    //         color = {0, 1, 0},  
-    //         intensity = 3.0,
-    //         constant = 1.0,
-    //         linear = 0.09,
-    //         quadratic = 0.032,
-    //         radius = 5.0,
-    //     }
-
-    // lighting.point_lights[1] = PointLight{
-    //         position = {
-    //             -1.25,                           // X: static
-    //             0.2,                           // Y: static  
-    //             -3 - math.sin(runtime_app) * 4,    // Z: oscillates between -7 and -3
-    //         },
-    //         color = {0, 0, 1},  
-    //         intensity = 3.0,
-    //         constant = 1.0,
-    //         linear = 0.09,
-    //         quadratic = 0.032,
-    //         radius = 5.0,
-    //     }
-    
-    // contents := lighting_buffer->contentsAsSlice([]LightingData)[:1]
-    // contents[0] = lighting
-
-    // render_encoder->setFragmentBuffer(lighting_buffer, 0, 1)
-
-    // for &model in models {
-    //     model_matrix := 
-    //     linalg.matrix4_translate_f32(model.position) *
-    //     linalg.matrix4_rotate_f32(model.rotation_angle, model.rotation_axis) *
-    //     linalg.matrix4_scale_f32(model.scale)
-                
-    //     ubo := Uniforms {
-    //         model_matrix = model_matrix,
-    //         view_matrix = view_matrix,
-    //         projection_matrix = projection_matrix,
-    //         light_position = {0,0,0,0},
-    //         light_direction = {0,0,0,0},
-    //         time_data = {runtime_app, delta, 0, 0},
-    //         mat = {model.material.offset.x, model.material.offset.y, model.material.scale.x, model.material.scale.y},
-    //     }
-
-    //     uniform_bytes := mem.ptr_to_bytes(&ubo)
-        
-    //     render_encoder->setVertexBytes(uniform_bytes, 1)
-    //     render_encoder->setVertexBuffer(model.mesh.vertex_buffer, 0, 0)
-    //     render_encoder->setFragmentBytes(uniform_bytes, 0)
-    //     render_encoder->setFragmentTexture(grass_tex.mtl_tex, 0)
-
-    //     render_encoder->setFragmentSamplerState(platform.texture_sampler, 0)
-
-    //     //render_encoder->drawPrimitives(.Triangle, 0, NS.UInteger(model.mesh.vertex_count))
-    //     render_encoder->drawIndexedPrimitives(.Triangle, NS.UInteger(model.mesh.index_count), .UInt32, model.mesh.index_buffer, 0)
-    // }
-
-    //render_encoder->setCullMode(.None);
-    // ui_begin()
-    // ui_add_rect({20, 50, 300, 300},  {0.5, 0.5, 0.5, 1} )
-    // ui_end(window, platform.device, render_encoder)
-    
-    
-  
+    execute_commands(&cmd_buffer)  
 }
 
 import "core:mem"
@@ -430,7 +325,7 @@ metal_init_buffer :: proc(
     usage: Buffer_Usage,
     access: Buffer_Access,
 ) -> Buffer {
-    assert(g_metal_device != nil, "Metal device not initialized")
+    assert(state.device != nil, "Metal device not initialized")
     
     storage_mode: MTL.ResourceOptions
     switch access {
@@ -443,7 +338,7 @@ metal_init_buffer :: proc(
     }
     
     // Create Metal buffer
-    metal_buffer := g_metal_device->newBuffer(
+    metal_buffer := state.device->newBuffer(
         NS.UInteger(size),
         storage_mode,
     )
@@ -520,7 +415,7 @@ metal_create_sampler :: proc(desc: Sampler_Desc) -> Sampler {
         sampler_desc->setMaxAnisotropy(NS.UInteger(desc.max_anisotropy))
     }
     
-    metal_sampler := g_metal_device->newSamplerState(sampler_desc)
+    metal_sampler := state.device->newSamplerState(sampler_desc)
     
     return Sampler{handle = metal_sampler}
 }
@@ -544,10 +439,9 @@ metal_destroy_sampler :: proc(sampler: ^Sampler) {
 
 ////////////////////////////////
 
-library: ^MTL.Library
 
 metal_compile_shader :: proc(desc: Shader_Desc) -> (Shader, bool) {
-    assert(g_metal_device != nil)
+    assert(state.device != nil)
     
     // For Metal, we need .metal source or precompiled .metallib
     if desc.source_type != .MSL {
@@ -556,22 +450,20 @@ metal_compile_shader :: proc(desc: Shader_Desc) -> (Shader, bool) {
     
     // Compile at runtime
 
-    if library == nil {
-        log.info("LOADING SHADER LIB")
-        library_desc := NS.new(MTL.CompileOptions)
-        source := NS.String.alloc()->initWithOdinString(desc.source)
-        defer source->release()
-        
-        err: ^NS.Error
-        library, err = g_metal_device->newLibraryWithSource(
-            source,
-            library_desc,
-        )
+    log.info("LOADING SHADER LIB")
+    library_desc := NS.new(MTL.CompileOptions)
+    source := NS.String.alloc()->initWithOdinString(desc.source)
+    defer source->release()
+    
+    library, err := state.device->newLibraryWithSource(
+        source,
+        library_desc,
+    )
 
-        if err != nil {
-            log.panicf("Shader compilation error: %v", err->localizedDescription()->odinString())
-        }
+    if err != nil {
+        log.panicf("Shader compilation error: %v", err->localizedDescription()->odinString())
     }
+
 
 
     function_name := NS.String.alloc()->initWithOdinString(desc.entry_point)
@@ -590,7 +482,7 @@ metal_compile_shader :: proc(desc: Shader_Desc) -> (Shader, bool) {
 
 metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
     log.infof("Creating pipeline: %s", fmt.tprintf(desc.label))
-    assert(g_metal_device != nil)
+    assert(state.device != nil, "Device not initialized")
     
     render_pipeline_desc := MTL.RenderPipelineDescriptor.alloc()->init()
     pipeline_label := NS.String.alloc()->initWithOdinString(desc.label)
@@ -618,8 +510,7 @@ metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
             mtl_attr->setOffset(NS.UInteger(attr.offset))
             mtl_attr->setBufferIndex(NS.UInteger(attr.binding))
 
-            log.infof("  Attribute %d: format=%v, offset=%d, binding=%d", i, attr.format, attr.offset, attr.binding)
-
+            log.infof("Attribute %d: format=%v, offset=%d, binding=%d", i, attr.format, attr.offset, attr.binding)
         }
         
         for layout, i in desc.vertex_layouts {
@@ -629,20 +520,20 @@ metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
                 layout.step_rate == .PerVertex ? .PerVertex : .PerInstance
             )
 
-            log.infof("  Layout %d: stride=%d, step_rate=%v", i, layout.stride, layout.step_rate)
+            log.infof("Layout %d: stride=%d, step_rate=%v", i, layout.stride, layout.step_rate)
         }
         
         render_pipeline_desc->setVertexDescriptor(vertex_desc)
         log.info("✓ Vertex descriptor set")
     }
 
-    assert(len(desc.color_formats) > 0, "No color formats specified")
+    //assert(len(desc.color_formats) > 0, "No color formats specified")
     
+    color_attachment := render_pipeline_desc->colorAttachments()->object(0)
+    color_attachment->setPixelFormat(state.swapchain->pixelFormat())
+
     // Color attachments
-    for format, i in desc.color_formats {
-        color_attachment := render_pipeline_desc->colorAttachments()->object(NS.UInteger(i))
-        color_attachment->setPixelFormat(metal_pixel_format(format))
-        
+    // for format, i in desc.color_formats { 
         // TODO color blend options
         // if i < len(desc.blend_states) {
         //     blend := desc.blend_states[i]
@@ -658,11 +549,11 @@ metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
         //         color_attachment->setAlphaBlendOperation(metal_blend_op(blend.alpha_op))
         //     }
         // }
-    }
+    // }
     log.info("✓ Color attachments set")
 
     render_pipeline_desc->setSampleCount(NS.UInteger(desc.sample_count))
-    render_pipeline_desc->setTessellationOutputWindingOrder(.Clockwise)
+    //render_pipeline_desc->setTessellationOutputWindingOrder(.Clockwise)
 
     // Depth attachment
     if desc.depth_format != .RGBA8_UNorm {  // Has depth
@@ -670,11 +561,8 @@ metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
     }
         
     // Create pipeline state
-    pipeline_state, err := g_metal_device->newRenderPipelineState(render_pipeline_desc)
-    
-    if err != nil {
-        log.panicf("Failed to create Metal pipeline:", fmt.tprintf(err->localizedDescription()->odinString()))
-    }
+    pipeline_state, err := state.device->newRenderPipelineState(render_pipeline_desc)
+    assert(pipeline_state != nil, fmt.tprintf("Failed to create Metal pipeline: %v", err->localizedDescription()->odinString()))
 
     log.info("✓ Pipeline created successfully")
     // Depth state (separate object in Metal)
@@ -683,7 +571,7 @@ metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
         depth_desc := MTL.DepthStencilDescriptor.alloc()->init()
         depth_desc->setDepthCompareFunction(metal_compare_op(desc.depth_state.compare_op))
         depth_desc->setDepthWriteEnabled(desc.depth_state.write_enabled)
-        depth_state = g_metal_device->newDepthStencilState(depth_desc)
+        depth_state = state.device->newDepthStencilState(depth_desc)
     }
     
     // Store both in handle (need custom struct)
@@ -792,8 +680,7 @@ metal_compare_op :: proc(op: Compare_Op) -> MTL.CompareFunction {
 //////////////////////////////////////////
 
 metal_create_texture :: proc(desc: Texture_Desc) -> Texture {
-    assert(g_metal_device != nil)
-    
+    assert(state.device != nil, "Device not initialized")
     texture_desc := MTL.TextureDescriptor.alloc()->init()
     defer texture_desc->release()
     
@@ -809,13 +696,19 @@ metal_create_texture :: proc(desc: Texture_Desc) -> Texture {
         texture_desc->setTextureType(.Type2DMultisample)
     }
     
-    // Dimensions
-    texture_desc->setWidth(NS.UInteger(desc.width))
-    texture_desc->setHeight(NS.UInteger(desc.height))
-    texture_desc->setDepth(NS.UInteger(max(desc.depth, 1)))
-    
     // Format
     texture_desc->setPixelFormat(metal_pixel_format(desc.format))
+    
+    // Custom dimensions?
+    // Dimensions
+    //texture_desc->setWidth(NS.UInteger(desc.width))
+    //texture_desc->setHeight(NS.UInteger(desc.height))
+
+    texture_desc->setWidth(NS.UInteger(state.swapchain->drawableSize().width))
+    texture_desc->setHeight(NS.UInteger(state.swapchain->drawableSize().height))
+    
+    //texture_desc->setDepth(NS.UInteger(max(desc.depth, 1)))
+    
     
     // Sample count (MSAA)
     texture_desc->setSampleCount(NS.UInteger(desc.sample_count))
@@ -837,7 +730,7 @@ metal_create_texture :: proc(desc: Texture_Desc) -> Texture {
     }
     texture_desc->setUsage(usage_flags)
 
-    metal_texture := g_metal_device->newTexture(texture_desc)
+    metal_texture := state.device->newTexture(texture_desc)
     
     if metal_texture == nil {
         log.panic("Failed to create texture")
@@ -848,11 +741,6 @@ metal_create_texture :: proc(desc: Texture_Desc) -> Texture {
         desc = desc,
     }
 }
-
-get_drawable :: proc() -> rawptr {
-    return drawable
-}
-
 
 metal_destroy_texture :: proc(texture: ^Texture) {
     if texture.handle == nil do return
@@ -875,59 +763,58 @@ Metal_Command_Executor :: struct {
 }
 
 execute_commands :: proc(
-    platform: ^MetalPlatform,
     cb: ^Command_Buffer,
 ) {
-    command_buffer := platform.command_queue->commandBuffer()
+    command_buffer := state.command_queue->commandBuffer()
     assert(command_buffer != nil, "Failed to create command buffer")
 
     for cmd in cb.commands {
         switch c in cmd {
         case Update_Renderpass_Desc:
-            update_render_pass_descriptor(c, platform)
+            update_render_pass_descriptor(c)
 
         case Begin_Pass_Command:
-            execute_begin_pass(&platform.encoder, command_buffer, c)
+            execute_begin_pass(command_buffer, c)
             
         case End_Pass_Command:
-            execute_end_pass(platform.encoder)
+            execute_end_pass()
 
         case Set_Pipeline_Command:
-            execute_set_pipeline(platform.encoder, c)
+            execute_set_pipeline(c)
             
         case Set_Viewport_Command:
-            execute_set_viewport(platform.encoder, c)
+            execute_set_viewport(c)
             
         case Bind_Vertex_Buffer_Command:
-            execute_bind_vertex_buffer(platform.encoder, c)
+            execute_bind_vertex_buffer(c)
             
         case Bind_Index_Buffer_Command:
-            execute_bind_index_buffer(nil, c)
+            execute_bind_index_buffer(c)
             
         case Bind_Texture_Command:
-            execute_bind_texture(platform.encoder, c)
+            execute_bind_texture(c)
             
         case Set_Uniform_Command:
-            execute_set_uniform(platform.encoder, c)
+            execute_set_uniform(c)
             
         case Draw_Command:
-            execute_draw(platform.encoder, c)
+            execute_draw(c)
             
         case Draw_Indexed_Command:
-            //execute_draw_indexed(executor, c)
+            execute_draw_indexed(c)
             
         case Set_Scissor_Command:
-            //execute_set_scissor(executor, c)
+            execute_set_scissor(c)
 
         case Render_Pass_MSAA_Desc:
-            metal_begin_msaa_pass(&platform.encoder, platform.device, command_buffer, c, platform.metalDrawable)
+            //metal_begin_msaa_pass(command_buffer, c)
 
         case Draw_Mesh_Command:
-            //execute_draw_mesh(executor, c)
+            //execute_draw_mesh(c)
         }
     }
     
-    command_buffer->presentDrawable(platform.metalDrawable)
+    command_buffer->presentDrawable(state.metalDrawable)
     command_buffer->commit()
 }
 
@@ -1017,6 +904,10 @@ Mesh :: struct {
     index_count: int,
 }
 
+next :: proc() {
+    state.metalDrawable = state.swapchain->nextDrawable()
+}
+
 metal_begin_msaa_pass :: proc(
     encoder: ^^MTL.RenderCommandEncoder,
     device: ^MTL.Device,
@@ -1074,88 +965,80 @@ metal_begin_msaa_pass :: proc(
 }
 
 metal_create_renderpass_descriptor :: proc(desc: RenderPassDescriptor) -> rawptr {
-    render_pass := MTL.RenderPassDescriptor.renderPassDescriptor()
+    render_pass_descriptor := MTL.RenderPassDescriptor.alloc()->init()
     
-    color_attachment := render_pass->colorAttachments()->object(0)
+    color_attachment := render_pass_descriptor->colorAttachments()->object(0)
+    depth_attachment := render_pass_descriptor->depthAttachment()
     
     // MSAA or direct rendering
 
-    log.debug("***")
-    log.debug(desc.msaa_texture.handle)
-
-    d := cast(^CA.MetalDrawable)desc.drawable
     if desc.msaa_texture.handle != nil {
-        log.debug("Set")
         msaa_tex := cast(^MTL.Texture)desc.msaa_texture.handle
         color_attachment->setTexture(msaa_tex)
-        color_attachment->setResolveTexture(d->texture())
+        color_attachment->setResolveTexture(state.metalDrawable->texture())
+        color_attachment->setLoadAction(.Clear)
+        color_attachment->setClearColor(MTL.ClearColor{
+            f64(desc.clear_color.r),
+            f64(desc.clear_color.g),
+            f64(desc.clear_color.b),
+            f64(desc.clear_color.a),
+        })
         color_attachment->setStoreAction(.StoreAndMultisampleResolve)
     } else {
-        log.debug("Not set")
-        color_attachment->setTexture(d->texture())
-        color_attachment->setStoreAction(.Store)
+        assert(false, "MSAA Handle not set?")
     }
     
-    color_attachment->setLoadAction(.Clear)
-    
-    color_attachment->setClearColor(MTL.ClearColor{
-        f64(desc.clear_color.r),
-        f64(desc.clear_color.g),
-        f64(desc.clear_color.b),
-        f64(desc.clear_color.a),
-    })
     
     // Depth
     if desc.depth_texture.handle != nil {
-        log.debug("Setting depth")
-        depth_attachment := render_pass->depthAttachment()
         depth_tex := cast(^MTL.Texture)desc.depth_texture.handle
         depth_attachment->setTexture(depth_tex)
         depth_attachment->setLoadAction(.Clear)
-        depth_attachment->setClearDepth(f64(desc.clear_depth))
         depth_attachment->setStoreAction(.DontCare)
+        depth_attachment->setClearDepth(1.0)
+    } else {
+        assert(false, "Depth Handle not set?")
     }
 
-    return render_pass
+    return render_pass_descriptor
 }
 
 @(private)
 execute_begin_pass :: proc(
-    encoder: ^^MTL.RenderCommandEncoder,
     command_buffer: ^MTL.CommandBuffer,
     cmd: Begin_Pass_Command,
 ) {
-    encoder^ = command_buffer->renderCommandEncoderWithDescriptor(cast(^MTL.RenderPassDescriptor)cmd.renderpass_descriptor)
+    state.encoder = command_buffer->renderCommandEncoderWithDescriptor(cast(^MTL.RenderPassDescriptor)cmd.renderpass_descriptor)
     
     label := NS.String.alloc()->initWithOdinString(cmd.name)
-    encoder^->setLabel(label)
+    state.encoder->setLabel(label)
 }
 
 @(private)
-execute_end_pass :: proc(encoder: ^MTL.RenderCommandEncoder) {
-    encoder->endEncoding()
+execute_end_pass :: proc() {
+    state.encoder->endEncoding()
     //Maybe set platform.encoder to nil?
 }
 
 @(private)
-execute_set_pipeline :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Set_Pipeline_Command) {
+execute_set_pipeline :: proc(cmd: Set_Pipeline_Command) {
     metal_pipeline := cast(^Metal_Pipeline)cmd.pipeline.handle
-    encoder->setRenderPipelineState(metal_pipeline.render_state)
+    state.encoder->setRenderPipelineState(metal_pipeline.render_state)
     
-    encoder->setCullMode(metal_cull_mode(cmd.pipeline.desc.cull_mode))
-    encoder->setFrontFacingWinding(
+    state.encoder->setCullMode(metal_cull_mode(cmd.pipeline.desc.cull_mode))
+    state.encoder->setFrontFacingWinding(
         cmd.pipeline.desc.front_face == .Clockwise ? .Clockwise : .CounterClockwise
     )
-    encoder->setTriangleFillMode(.Fill)
+    state.encoder->setTriangleFillMode(.Fill)
     
     if metal_pipeline.depth_state != nil {
-        encoder->setDepthStencilState(metal_pipeline.depth_state)
+        state.encoder->setDepthStencilState(metal_pipeline.depth_state)
     }
 }
 
 @(private)
-execute_set_viewport :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Set_Viewport_Command) {
-    encoder->setViewport(MTL.Viewport{
+execute_set_viewport :: proc(cmd: Set_Viewport_Command) {
+    state.encoder->setViewport(MTL.Viewport{
         originX = f64(cmd.x),
         originY = f64(cmd.y),
         width   = f64(cmd.width),
@@ -1166,30 +1049,30 @@ execute_set_viewport :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Set_Viewpo
 }
 
 @(private)
-execute_bind_vertex_buffer :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Bind_Vertex_Buffer_Command) {
+execute_bind_vertex_buffer :: proc(cmd: Bind_Vertex_Buffer_Command) {
     metal_buffer := cast(^MTL.Buffer)cmd.buffer.handle
 
-    encoder->setVertexBuffer(
+    state.encoder->setVertexBuffer(
         metal_buffer,
         NS.UInteger(cmd.offset),
         NS.UInteger(cmd.binding),
     )
 }
 
-@(private)execute_bind_index_buffer :: proc(executor: ^Metal_Command_Executor, cmd: Bind_Index_Buffer_Command) {
+@(private)execute_bind_index_buffer :: proc(cmd: Bind_Index_Buffer_Command) {
     // Index buffer is bound in draw call in Metal
     // Store for later
 }
 
 @(private)
-execute_bind_texture :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Bind_Texture_Command) {
+execute_bind_texture :: proc(cmd: Bind_Texture_Command) {
     metal_texture := cast(^MTL.Texture)cmd.texture.handle
     
     switch cmd.stage {
     case .Vertex:
-        encoder->setVertexTexture(metal_texture, NS.UInteger(cmd.slot))
+        state.encoder->setVertexTexture(metal_texture, NS.UInteger(cmd.slot))
     case .Fragment:
-        encoder->setFragmentTexture(metal_texture, NS.UInteger(cmd.slot))
+        state.encoder->setFragmentTexture(metal_texture, NS.UInteger(cmd.slot))
     case .Compute:
         // Not applicable for render encoder
     }
@@ -1198,17 +1081,17 @@ execute_bind_texture :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Bind_Textu
 import "core:slice"
 
 @(private)
-execute_set_uniform :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Set_Uniform_Command) {
+execute_set_uniform :: proc(cmd: Set_Uniform_Command) {
     switch cmd.stage {
     case .Vertex:
         b := slice.bytes_from_ptr(cmd.data, cmd.size)
-        encoder->setVertexBytes(
+        state.encoder->setVertexBytes(
             b,
             NS.UInteger(cmd.slot),
         )
     case .Fragment:
         b := slice.bytes_from_ptr(cmd.data, cmd.size)
-        encoder->setFragmentBytes(
+        state.encoder->setFragmentBytes(
             b,
             NS.UInteger(cmd.slot),
         )
@@ -1221,9 +1104,9 @@ execute_set_uniform :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Set_Uniform
 }
 
 @(private)
-execute_draw :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Draw_Command) {
+execute_draw :: proc(cmd: Draw_Command) {
 
-    encoder->drawPrimitives(
+    state.encoder->drawPrimitives(
         .Triangle,
         NS.UInteger(cmd.first_vertex),
         NS.UInteger(cmd.vertex_count),
@@ -1231,20 +1114,20 @@ execute_draw :: proc(encoder: ^MTL.RenderCommandEncoder, cmd: Draw_Command) {
 }
 
 @(private)
-execute_draw_indexed :: proc(executor: ^Metal_Command_Executor, cmd: Draw_Indexed_Command) {
+execute_draw_indexed :: proc(cmd: Draw_Indexed_Command) {
     // Assumes index buffer was bound earlier
-    executor.current_encoder->drawIndexedPrimitives(
+    state.encoder->drawIndexedPrimitives(
         .Triangle,
         NS.UInteger(cmd.index_count),
         .UInt32,  // Assuming 32-bit indices
-        nil,  // Index buffer (should be tracked from bind command)
+        cast(^MTL.Buffer)cmd.index_buffer.handle,
         NS.UInteger(cmd.vertex_offset)
     )
 }
 
 @(private)
-execute_set_scissor :: proc(executor: ^Metal_Command_Executor, cmd: Set_Scissor_Command) {
-    executor.current_encoder->setScissorRect(MTL.ScissorRect{
+execute_set_scissor :: proc(cmd: Set_Scissor_Command) {
+    state.encoder->setScissorRect(MTL.ScissorRect{
         x = NS.Integer(cmd.x),
         y = NS.Integer(cmd.y),
         width = NS.Integer(cmd.width),

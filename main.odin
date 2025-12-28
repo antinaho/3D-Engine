@@ -177,7 +177,6 @@ update_window :: proc(aw: ^ApplicationWindow) {
 	}
 
 	if aw.renderer != nil {
-		
 		aw.renderer.draw(aw.window, aw.renderer) 
 	}
 }
@@ -192,10 +191,13 @@ render_pass_3d: Renderer_3D
 run :: proc() {
 
 	render_pass_3d = init_renderer_3d(1280, 720)
-	defer destroy_renderer_3d(&render_pass_3d)
+	//defer destroy_renderer_3d(&render_pass_3d)
 
 	b = init_buffer_with_size(size_of(Vertex) * len(TriangleVertices), .Vertex, .Static)
 	fill_buffer(&b, raw_data(TriangleVertices[:]), size_of(Vertex) * len(TriangleVertices))
+
+	bi = init_buffer_with_size(size_of(u32) * len(TriangleIndices), .Index, .Static)
+	fill_buffer(&bi, raw_data(TriangleIndices[:]), size_of(u32) * len(TriangleIndices))
 
 	for !close_requested() {
 		free_all(context.temp_allocator)

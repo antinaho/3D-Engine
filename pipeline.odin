@@ -129,7 +129,7 @@ Pipeline_Desc :: struct {
     depth_state: Depth_State,
     
     // Color attachments
-    color_formats: []Pixel_Format,
+    //color_formats: []Pixel_Format,
     blend_states: []Blend_State,  // One per color attachment
     
     // Optional

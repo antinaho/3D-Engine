@@ -49,7 +49,7 @@ Renderer_3D :: struct {
     pipeline: Pipeline,
     
     // Render targets
-    msaa_color_texture: Texture,
+    msaa_render_target_texture: Texture,
     depth_texture: Texture,
     
     // Resources
@@ -76,8 +76,7 @@ create_default_pipeline :: proc() -> Pipeline {
     append(&layouts, Vertex_Layout{stride = size_of(Vertex), step_rate = .PerVertex})
 
     MSAA_SAMPLE_COUNT :: 4
-    pixel_formats := make([dynamic]Pixel_Format)
-    append(&pixel_formats, Pixel_Format.BGRA8_UNorm_sRGB)
+
 
     return create_pipeline(Pipeline_Desc{
         label = "3D Rendering Pipeline",
@@ -88,8 +87,9 @@ create_default_pipeline :: proc() -> Pipeline {
         vertex_attributes = attributes[:],
         vertex_layouts = layouts[:],
         
+        // TODO cull mode and frontface
         primitive_topology = .TriangleList,
-        cull_mode = .Back,
+        cull_mode = .None,
         front_face = .CounterClockwise,
         
         depth_state = {
@@ -97,8 +97,7 @@ create_default_pipeline :: proc() -> Pipeline {
             write_enabled = true,
             compare_op = .LessOrEqual,
         },
-        
-        color_formats = pixel_formats[:],
+
         depth_format = .Depth32_Float,
         sample_count = MSAA_SAMPLE_COUNT,  // MSAA
     })
@@ -115,10 +114,7 @@ init_renderer_3d :: proc(
     renderer.pipeline = create_default_pipeline()
 
     // Create MSAA color target
-    renderer.msaa_color_texture = create_texture(Texture_Desc{
-        width = width,
-        height = height,
-        depth = 1,
+    renderer.msaa_render_target_texture = create_texture(Texture_Desc{
         format = .BGRA8_UNorm,
         usage = .RenderTarget,
         type = .Texture2DMultisample,
@@ -128,9 +124,6 @@ init_renderer_3d :: proc(
     
     // Create depth buffer
     renderer.depth_texture = create_texture(Texture_Desc{
-        width = width,
-        height = height,
-        depth = 1,
         format = .Depth32_Float,
         usage = .Depth,
         type = .Texture2DMultisample,
@@ -151,20 +144,11 @@ init_renderer_3d :: proc(
     
     renderer.renderpass_descriptor = create_renderpass_descriptor(RenderPassDescriptor {
         name="Test",
-        clear_color = {0.1,0.1,0.3,1},
-        clear_depth = 1.0,
+        clear_color = {235 / 255.0, 177 / 255.0 , 136 / 255.0,1.0},
         load_action =.Clear,
-        msaa_texture=renderer.msaa_color_texture,
+        msaa_texture=renderer.msaa_render_target_texture,
         depth_texture=renderer.depth_texture,
-        drawable = get_drawable(),
     })
-
-
-    log.debug(renderer.depth_texture)
-    log.debug(renderer.msaa_color_texture)
-    log.error(renderer.pipeline)
-    
-    log.debug(renderer.renderpass_descriptor)
 
     return renderer
 }
@@ -172,13 +156,12 @@ init_renderer_3d :: proc(
 RenderPassDescriptor :: struct {
     name: string,
     clear_color: [4]f32,
-    clear_depth: f32,
+    //clear_depth: f32,
     load_action: Load_Action,
     
     // Optional: For MSAA
     msaa_texture: Texture,
     depth_texture: Texture,
-    drawable: rawptr,
 }
 
 create_renderpass_descriptor :: proc(desc: RenderPassDescriptor) -> rawptr {
@@ -191,14 +174,13 @@ create_renderpass_descriptor :: proc(desc: RenderPassDescriptor) -> rawptr {
 
 resize_renderer_3d :: proc(renderer: ^Renderer_3D, width: int, height: int) {
     // Destroy old textures
-    destroy_texture(&renderer.msaa_color_texture)
+    destroy_texture(&renderer.msaa_render_target_texture)
     destroy_texture(&renderer.depth_texture)
     
     // Recreate with new size
-    renderer.msaa_color_texture = create_texture(Texture_Desc{
+    renderer.msaa_render_target_texture = create_texture(Texture_Desc{
         width = width,
         height = height,
-        depth = 1,
         format = .BGRA8_UNorm_sRGB,
         usage = .RenderTarget,
         type = .Texture2D,
@@ -209,7 +191,6 @@ resize_renderer_3d :: proc(renderer: ^Renderer_3D, width: int, height: int) {
     renderer.depth_texture = create_texture(Texture_Desc{
         width = width,
         height = height,
-        depth = 1,
         format = .Depth32_Float,
         usage = .Depth,
         type = .Texture2D,
@@ -220,7 +201,7 @@ resize_renderer_3d :: proc(renderer: ^Renderer_3D, width: int, height: int) {
 
 destroy_renderer_3d :: proc(renderer: ^Renderer_3D) {
     destroy_pipeline(&renderer.pipeline)
-    destroy_texture(&renderer.msaa_color_texture)
+    destroy_texture(&renderer.msaa_render_target_texture)
     destroy_texture(&renderer.depth_texture)
     destroy_sampler(&renderer.default_sampler)
 }
