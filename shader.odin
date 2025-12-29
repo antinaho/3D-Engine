@@ -4,25 +4,25 @@ import "core:os"
 import "core:strings"
 import "core:fmt"
 
-Shader_Source_Type :: enum {
+ShaderLanguage :: enum {
     SPIRV,      // Vulkan native, can convert to others
     MSL,        // Metal Shading Language
     HLSL,       // Direct3D
 }
 
-Shader_Desc :: struct {
+ShaderDesc :: struct {
     source: string,
-    source_type: Shader_Source_Type,
-    stage: Shader_Stage,
+    shader_language: ShaderLanguage,
+    stage: ShaderStage,
     entry_point: string,  // "main", "vertex_main", etc.
 }
 
 Shader :: struct {
     handle: rawptr,
-    stage: Shader_Stage,
+    stage: ShaderStage,
 }
 
-compile_shader :: proc(desc: Shader_Desc) -> (Shader, bool) {
+compile_shader :: proc(desc: ShaderDesc) -> (Shader, bool) {
     when RENDERER == .Metal {
         return metal_compile_shader(desc)
     } else when RENDERER == .Vulkan {
@@ -30,13 +30,13 @@ compile_shader :: proc(desc: Shader_Desc) -> (Shader, bool) {
     }
 }
 
-load_shader :: proc(path: string, stage: Shader_Stage, entry_point: string) -> (Shader, bool) {
+load_shader :: proc(path: string, stage: ShaderStage, entry_point: string) -> (Shader, bool) {
     source, ok := os.read_entire_file(path, context.temp_allocator)
     assert(ok, fmt.tprintf("Cant open shader file at: %v", path))
     if !ok do return {}, false
     
     // Detect type from extension
-    source_type: Shader_Source_Type
+    source_type: ShaderLanguage
     if strings.has_suffix(path, ".metal") {
         source_type = .MSL
     } else if strings.has_suffix(path, ".hlsl") {
@@ -45,9 +45,9 @@ load_shader :: proc(path: string, stage: Shader_Stage, entry_point: string) -> (
         source_type = .SPIRV
     }
     
-    return compile_shader(Shader_Desc{
+    return compile_shader(ShaderDesc{
         source = string(source),
-        source_type = source_type,
+        shader_language = source_type,
         stage = stage,
         entry_point = entry_point,
     })

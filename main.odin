@@ -6,12 +6,6 @@ import "core:fmt"
 import "core:log"
 import "core:time"
 
-vert_shader_code :: #load("shaders/vert.spv")
-frag_shader_code :: #load("shaders/frag.spv")
-
-model :: "viking_room.obj"
-model_tex :: "viking_room.png"
-
 Vertex :: struct #align(16) {
     position: [3]f32,
 	_: f32,
@@ -27,19 +21,126 @@ Vertex :: struct #align(16) {
 
 import "core:math"
 import "core:math/linalg"
-matrix_perspective_right_hand :: proc(nearZ, farZ, aspect, fovy_rad: f32) -> linalg.Matrix4x4f32 {
-	ys := 1.0 / math.tan_f32(fovy_rad * 0.5)
-	xs := ys / aspect
-	zs := farZ / (nearZ - farZ)
-	return linalg.Matrix4x4f32 {
-		xs,	0,	0,	0,
-		0,	ys,	0,	0,
-		0,	0,	zs,	nearZ * zs,
-		0,	0,	-1,	0
-	}
+
+
+
+// Helper to create translation matrix
+matrix_translate :: proc(v: [3]f32) -> matrix[4,4]f32 {
+	return matrix[4,4]f32{
+        1,   0,   0,   v.x,
+        0,   1,   0,   v.y,
+        0,   0,   1,   v.z,
+        0,   0,   0,   1,
+    }
 }
 
-import alg "core:math/linalg"
+// Helper to create scale matrix
+matrix_scale :: proc(v: [3]f32) -> matrix[4,4]f32 {
+    return matrix[4,4]f32{
+        v.x, 0, 0, 0,
+        0, v.y, 0, 0,
+        0, 0, v.z, 0,
+        0, 0, 0, 1,
+    }
+}
+
+// Rotation around X axis
+matrix_rotate_x :: proc(angle_radians: f32) -> matrix[4,4]f32 {
+    c := math.cos(angle_radians)
+    s := math.sin(angle_radians)
+    return matrix[4,4]f32{
+        1,  0,  0, 0,
+        0,  c,  -s, 0,
+        0, s,  c, 0,
+        0,  0,  0, 1,
+
+    }
+}
+
+// Rotation around Y axis
+matrix_rotate_y :: proc(angle_radians: f32) -> matrix[4,4]f32 {
+    c := math.cos(angle_radians)
+    s := math.sin(angle_radians)
+    return matrix[4,4]f32{
+        c, 0, s, 0,
+        0, 1,  0, 0,
+        -s, 0,  c, 0,
+		0, 0,  0, 1,
+    }
+}
+
+// Rotation around Z axis
+matrix_rotate_z :: proc(angle_radians: f32) -> matrix[4,4]f32 {
+    c := math.cos(angle_radians)
+    s := math.sin(angle_radians)
+    return matrix[4,4]f32{
+         c, -s, 0, 0,
+         s,  c, 0, 0,
+         0,  0, 1, 0,
+         0,  0, 0, 1,
+
+
+    }
+}
+
+// Model matrix (TRS: Translate * Rotate * Scale)
+matrix_model :: proc(position: [3]f32, rotation: [3]f32, scale: [3]f32) -> matrix[4,4]f32 {
+    T := matrix_translate(position)
+    Rx := matrix_rotate_x(rotation.x)
+    Ry := matrix_rotate_y(rotation.y)
+    Rz := matrix_rotate_z(rotation.z)
+    S := matrix_scale(scale)
+    
+    return T * Ry * Rx * Rz * S  // Order matters!
+}
+
+// View matrix (look-at)
+matrix_look_at :: proc(eye: [3]f32, target: [3]f32, up: [3]f32) -> matrix[4,4]f32 {
+    f := linalg.normalize(target - eye)  // Forward
+    r := linalg.normalize(linalg.cross(f, up))  // Right
+    u := linalg.cross(r, f)  // Up
+    
+    return matrix[4,4]f32{
+        r.x, u.x, -f.x, 0,
+        r.y, u.y, -f.y, 0,
+        r.z, u.z, -f.z, 0,
+        -linalg.dot(r, eye), -linalg.dot(u, eye), linalg.dot(f, eye), 1,
+    }
+}
+
+// Perspective projection (Metal uses depth [0, 1] and right-handed Y-up)
+matrix_perspective :: proc(fov_y_radians: f32, aspect: f32, near: f32, far: f32) -> matrix[4,4]f32 {
+    tan_half_fov := math.tan(fov_y_radians * 0.5)
+    
+    return matrix[4,4]f32{
+        1.0 / (aspect * tan_half_fov), 0, 0, 0,
+        0, 1.0 / tan_half_fov, 0, 0,
+        0, 0, far / (near - far), -1,
+        0, 0, (near * far) / (near - far), 0,
+    }
+}
+
+// Orthographic projection (Metal depth [0, 1])
+_matrix_orthographic :: proc(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> matrix[4,4]f32 {
+    return matrix[4,4]f32{
+        2.0 / (right - left), 0, 0, 0,
+        0, 2.0 / (top - bottom), 0, 0,
+        0, 0, 1.0 / (near - far), 0,
+        -(right + left) / (right - left), -(top + bottom) / (top - bottom), near / (near - far), 1,
+    }
+}
+
+get_orthographic_projection :: proc(camera: Camera) -> matrix[4,4]f32 {
+    height := camera.zoom
+    width := height * camera.aspect
+    
+    return _matrix_orthographic(
+        -width * 0.5, width * 0.5,   // left, right
+        -height * 0.5, height * 0.5,  // bottom, top
+        camera.near,
+        camera.far,
+    )
+}
 
 @(private="file")
 application: ^Application
@@ -56,7 +157,6 @@ ApplicationWindow :: struct {
 	flags: WindowFlags,
 	renderer: ^Renderer,
 	
-
 	using _ : WindowInput,
 	layers: [dynamic]Layer,
 }
@@ -77,7 +177,6 @@ init :: proc(width, height: int, title: string, allocator := context.allocator, 
 }
 
 create_window :: proc(width, height: int, title: string, allocator: runtime.Allocator, flags := WindowFlags{}) -> ^ApplicationWindow {
-	
 	window := window_create_mac(width, height, title, allocator, flags)
 	renderer := metal_init(window)
 
@@ -126,7 +225,8 @@ update_window :: proc(aw: ^ApplicationWindow) {
 	for &event in events {
 		switch &e in event {
 			case WindowEventCloseRequested:
-				aw.close_requested = true				
+				aw.close_requested = true
+
 			case KeyPressedEvent:
 				aw.keys_press_started[e.key] = aw.keys_held[e.key] ~ true
 				aw.keys_held[e.key] = true
@@ -193,11 +293,12 @@ run :: proc() {
 	render_pass_3d = init_renderer_3d(1280, 720)
 	//defer destroy_renderer_3d(&render_pass_3d)
 
-	b = init_buffer_with_size(size_of(Vertex) * len(TriangleVertices), .Vertex, .Static)
-	fill_buffer(&b, raw_data(TriangleVertices[:]), size_of(Vertex) * len(TriangleVertices))
+	vertex_buf = init_buffer_with_size(size_of(Vertex) * 1000, .Vertex, .Dynamic)
+	uniform_buf = init_buffer_with_size(size_of(U), .Vertex, .Static)
+	instance_buf = init_buffer_with_size(size_of(I) * 1000, .Vertex, .Dynamic)
 
-	bi = init_buffer_with_size(size_of(u32) * len(TriangleIndices), .Index, .Static)
-	fill_buffer(&bi, raw_data(TriangleIndices[:]), size_of(u32) * len(TriangleIndices))
+	index_buf = init_buffer_with_size(size_of(u32) * len(QuadIndeces), .Index, .Static)
+	fill_buffer(&index_buf, raw_data(QuadIndeces[:]), size_of(u32) * len(QuadIndeces))
 
 	for !close_requested() {
 		free_all(context.temp_allocator)

@@ -1,6 +1,6 @@
 package main
 
-Vertex_Format :: enum {
+VertexFormat :: enum {
     Float,
     Float2,
     Float3,
@@ -11,23 +11,23 @@ Vertex_Format :: enum {
     UInt4,
 }
 
-Vertex_Attribute :: struct {
-    format: Vertex_Format,
-    offset: int,
+VertexAttribute :: struct {
+    format: VertexFormat,
+    offset: uintptr,
     binding: int, 
 }
 
-Vertex_Layout :: struct {
+VertexLayout :: struct {
     stride: int,
-    step_rate: Vertex_Step_Rate,
+    step_rate: VertexStepRate,
 }
 
-Vertex_Step_Rate :: enum {
+VertexStepRate :: enum {
     PerVertex,
     PerInstance,
 }
 
-Blend_Factor :: enum {
+BlendFactor :: enum {
     Zero,
     One,
     SrcColor,
@@ -40,7 +40,7 @@ Blend_Factor :: enum {
     OneMinusDstAlpha,
 }
 
-Blend_Op :: enum {
+BlendOperation :: enum {
     Add,
     Subtract,
     ReverseSubtract,
@@ -48,23 +48,23 @@ Blend_Op :: enum {
     Max,
 }
 
-Blend_State :: struct {
+BlendState :: struct {
     enabled: bool,
-    src_color: Blend_Factor,
-    dst_color: Blend_Factor,
-    color_op: Blend_Op,
-    src_alpha: Blend_Factor,
-    dst_alpha: Blend_Factor,
-    alpha_op: Blend_Op,
+    src_color: BlendFactor,
+    dst_color: BlendFactor,
+    color_op: BlendOperation,
+    src_alpha: BlendFactor,
+    dst_alpha: BlendFactor,
+    alpha_op: BlendOperation,
 }
 
-Depth_State :: struct {
+DepthState :: struct {
     test_enabled: bool,
     write_enabled: bool,
-    compare_op: Compare_Op,
+    compare_op: CompareOperation,
 }
 
-Compare_Op :: enum {
+CompareOperation :: enum {
     Never,
     Less,
     Equal,
@@ -75,18 +75,18 @@ Compare_Op :: enum {
     Always,
 }
 
-Cull_Mode :: enum {
+CullMode :: enum {
     None,
     Front,
     Back,
 }
 
-Winding_Order :: enum {
+WindingOrder :: enum {
     Clockwise,
     CounterClockwise,
 }
 
-Primitive_Topology :: enum {
+PrimitiveTopology :: enum {
     PointList,
     LineList,
     LineStrip,
@@ -94,7 +94,7 @@ Primitive_Topology :: enum {
     TriangleStrip,
 }
 
-Pixel_Format :: enum {
+PixelFormat :: enum {
     RGBA8_UNorm,
     RGBA8_UNorm_sRGB,
     BGRA8_UNorm,
@@ -105,35 +105,35 @@ Pixel_Format :: enum {
     Depth24_Stencil8,
 }
 
-Shader_Stage :: enum {
+ShaderStage :: enum {
     Vertex,
     Fragment,
     Compute,
 }
 
-Pipeline_Desc :: struct {
+PipelineDesc :: struct {
     // Shaders
     vertex_shader: Shader,
     fragment_shader: Shader,
     
     // Vertex input
-    vertex_attributes: []Vertex_Attribute,
-    vertex_layouts: []Vertex_Layout,
+    vertex_attributes: []VertexAttribute,
+    vertex_layouts: []VertexLayout,
     
     // Rasterization
-    primitive_topology: Primitive_Topology,
-    cull_mode: Cull_Mode,
-    front_face: Winding_Order,
+    primitive_topology: PrimitiveTopology,
+    cull_mode: CullMode,
+    front_face: WindingOrder,
     
     // Depth/Stencil
-    depth_state: Depth_State,
+    depth_state: DepthState,
     
     // Color attachments
-    //color_formats: []Pixel_Format,
-    blend_states: []Blend_State,  // One per color attachment
+    color_formats: []PixelFormat,
+    blend_states: []BlendState,  // One per color attachment
     
     // Optional
-    depth_format: Pixel_Format,
+    depth_format: PixelFormat,
     sample_count: int,  // MSAA
     
     // Debug
@@ -142,11 +142,11 @@ Pipeline_Desc :: struct {
 
 Pipeline :: struct {
     handle: rawptr,  // Backend-specific pipeline
-    desc: Pipeline_Desc,  // Keep for debugging
+    desc: PipelineDesc,  // Keep for debugging
 }
 
 // Create pipeline
-create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
+create_pipeline :: proc(desc: PipelineDesc) -> Pipeline {
     when RENDERER == .Metal {
         return metal_create_pipeline(desc)
     } else when RENDERER == .Vulkan {

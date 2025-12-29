@@ -3,17 +3,21 @@ package main
 Render_Command :: union {
     Begin_Pass_Command,
     End_Pass_Command,
+
     Set_Pipeline_Command,
     Set_Viewport_Command,
     Set_Scissor_Command,
+    
     Bind_Vertex_Buffer_Command,
     Bind_Index_Buffer_Command,
     Bind_Texture_Command,
+
     Set_Uniform_Command,
+    
     Draw_Command,
     Draw_Indexed_Command,
-    Draw_Mesh_Command,
-    Render_Pass_MSAA_Desc,
+    Draw_Indexed_Instanced_Command,
+
     Update_Renderpass_Desc
 }
 
@@ -83,14 +87,14 @@ Bind_Index_Buffer_Command :: struct {
 Bind_Texture_Command :: struct {
     texture: Texture,
     slot: int,  // Texture slot (0-7 typically)
-    stage: Shader_Stage,  // Vertex or Fragment
+    stage: ShaderStage,  // Vertex or Fragment
 }
 
 Set_Uniform_Command :: struct {
     data: rawptr,
     size: int,
     slot: int,
-    stage: Shader_Stage,
+    stage: ShaderStage,
 }
 
 // ===== Draw Calls =====
@@ -106,6 +110,14 @@ Draw_Indexed_Command :: struct {
     index_buffer: Buffer,
 }
 
+Draw_Indexed_Instanced_Command :: struct {
+    index_count: int,
+    first_index: int,
+    vertex_offset: int,
+    index_buffer: Buffer,
+    instance_count: int,
+}
+
 Render_Pass_MSAA_Desc :: struct {
     name: string,
     clear_color: [4]f32,
@@ -114,15 +126,6 @@ Render_Pass_MSAA_Desc :: struct {
     resolve_texture: Texture,   // Where to resolve (can be swapchain)
     depth_texture: Texture,
 }
-
-Draw_Mesh_Command :: struct {
-    vertex_buffer: Buffer,
-    index_buffer: Buffer,
-    index_count: int,
-    material: Material,  // Textures + uniforms
-    transform: matrix[4, 4]f32,
-}
-
 
 ///////////////////////////////////////
 
@@ -155,11 +158,11 @@ cmd_bind_index_buffer :: proc(cb: ^Command_Buffer, buffer: Buffer, offset: int =
     append(&cb.commands, Bind_Index_Buffer_Command{buffer, offset})
 }
 
-cmd_bind_texture :: proc(cb: ^Command_Buffer, texture: Texture, slot: int, stage: Shader_Stage) {
+cmd_bind_texture :: proc(cb: ^Command_Buffer, texture: Texture, slot: int, stage: ShaderStage) {
     append(&cb.commands, Bind_Texture_Command{texture, slot, stage})
 }
 
-cmd_set_uniform :: proc(cb: ^Command_Buffer, data: $T, slot: int, stage: Shader_Stage) {
+cmd_set_uniform :: proc(cb: ^Command_Buffer, data: $T, slot: int, stage: ShaderStage) {
     // Copy uniform data (don't store pointer)
     uniform_data := new(T)
     uniform_data^ = data
@@ -188,26 +191,16 @@ cmd_draw_indexed :: proc(cb: ^Command_Buffer, index_count: int, index_buffer: Bu
     })
 }
 
-cmd_draw_mesh :: proc(
-    cb: ^Command_Buffer,
-    vertex_buffer: Buffer,
-    index_buffer: Buffer,
-    index_count: int,
-    material: Material,
-    transform: matrix[4, 4]f32,
-) {
-    append(&cb.commands, Draw_Mesh_Command{
-        vertex_buffer = vertex_buffer,
-        index_buffer = index_buffer,
+cmd_draw_indexed_with_instances :: proc(cb: ^Command_Buffer, index_count: int, index_buffer: Buffer, instance_count: int) {
+    append(&cb.commands, Draw_Indexed_Instanced_Command{
         index_count = index_count,
-        material = material,
-        transform = transform,
+        first_index = 0,
+        vertex_offset = 0,
+        index_buffer = index_buffer,
+        instance_count = instance_count,
     })
 }
 
-cmd_begin_msaa_pass :: proc(cb: ^Command_Buffer, desc: Render_Pass_MSAA_Desc) {
-    append(&cb.commands, desc)
-}
 
 Update_Renderpass_Desc :: struct {
     renderpass_descriptor: rawptr,

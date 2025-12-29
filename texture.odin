@@ -18,7 +18,7 @@ Texture_Desc :: struct {
     width: int,
     height: int,
     //depth: int,
-    format: Pixel_Format,
+    format: PixelFormat,
     usage: Texture_Usage,
     type: Texture_Type,
     sample_count: int,  // For MSAA
@@ -28,6 +28,19 @@ Texture_Desc :: struct {
 Texture :: struct {
     handle: rawptr,
     desc: Texture_Desc,
+}
+
+TextureLoadDesc :: struct {
+    filepath: string,
+    format: PixelFormat,
+}
+
+load_texture :: proc(desc: TextureLoadDesc) -> Texture {
+    when RENDERER == .Metal {
+        return metal_load_texture(desc)
+    } else when RENDERER == .Vulkan {
+    
+    }
 }
 
 create_texture :: proc(desc: Texture_Desc) -> Texture {

@@ -10,27 +10,30 @@ import "core:fmt"
 import "core:os"
 import stbi "vendor:stb/image"
 import "core:log"
+import "core:mem"
 
 import "core:strings"
-load_texture :: proc(renderer: ^Renderer, filepath: string) -> Texture {
-    platform := cast(^MetalPlatform)renderer.platform
+import "core:slice"
 
-    texture: Texture
+
+@(private="file")
+state: ^MetalPlatform
+
+metal_load_texture :: proc(desc: TextureLoadDesc) -> (texture: Texture) {
     w, h, c: i32
 
-    pixels := stbi.load(strings.clone_to_cstring(filepath, context.temp_allocator), &w, &h, &c, 4)
-    assert(pixels != nil, "Can't load")
+    pixels := stbi.load(strings.clone_to_cstring(desc.filepath, context.temp_allocator), &w, &h, &c, 4)
+    assert(pixels != nil, fmt.tprintf("Can't load texture from: %v", desc.filepath))
 
     texture.desc.width = int(w)
     texture.desc.height = int(h)
 
     texture_descriptor := NS.new(MTL.TextureDescriptor)
-    texture_descriptor->setPixelFormat(.RGBA8Unorm_sRGB)
+    texture_descriptor->setPixelFormat(metal_pixel_format[desc.format])
     texture_descriptor->setWidth(NS.UInteger(w))
     texture_descriptor->setHeight(NS.UInteger(h))
-
-    tex := platform.device->newTextureWithDescriptor(texture_descriptor)
-
+    
+    tex := state.device->newTextureWithDescriptor(texture_descriptor)
     region := MTL.Region{origin={0,0,0}, size={NS.Integer(w), NS.Integer(h), 1}}
     bytes_per_row := 4 * w
 
@@ -40,31 +43,12 @@ load_texture :: proc(renderer: ^Renderer, filepath: string) -> Texture {
     texture_descriptor->release()
     stbi.image_free(pixels)
 
-    return texture
+    return
 }
 
 MetalAPI :: RendererAPI {
     draw = metal_draw,
-    clear_background = clear_background,
     cleanup = _cleanup,
-}
-
-_cleanup :: proc(window: ^Window, renderer: ^Renderer) {
-    platform := cast(^MetalPlatform)renderer.platform
-
-    //platform.msaa_render_target_texture->release()
-    //platform.depth_texture->release()
-    //platform.renderPassDescriptor->release()
-    platform.swapchain->release()
-
-    
-
-    //grass_tex.mtl_tex->release()
-
-    platform.device->release()
-
-    free(platform)
-    free(renderer)
 }
 
 MetalPlatform :: struct {
@@ -76,12 +60,58 @@ MetalPlatform :: struct {
     encoder: ^MTL.RenderCommandEncoder,
 }
 
-MSAA_SAMPLE_COUNT :: 4
+_cleanup :: proc(window: ^Window, renderer: ^Renderer) {
+    platform := cast(^MetalPlatform)renderer.platform
 
-grass_tex: Texture
+    //platform.msaa_render_target_texture->release()
+    //platform.depth_texture->release()
+    //platform.renderPassDescriptor->release()
+    platform.swapchain->release()
 
+    platform.device->release()
 
-shader_code :: #load("shaders/shaders.metal")
+    free(platform)
+    free(renderer)
+}
+
+metal_create_renderpass_descriptor :: proc(desc: RenderPassDescriptor) -> rawptr {
+    render_pass_descriptor := MTL.RenderPassDescriptor.alloc()->init()
+    
+    color_attachment := render_pass_descriptor->colorAttachments()->object(0)
+    depth_attachment := render_pass_descriptor->depthAttachment()
+    
+    // MSAA or direct rendering
+
+    if desc.msaa_texture.handle != nil {
+        msaa_tex := cast(^MTL.Texture)desc.msaa_texture.handle
+        color_attachment->setTexture(msaa_tex)
+        color_attachment->setResolveTexture(state.metalDrawable->texture())
+        color_attachment->setLoadAction(.Clear)
+        color_attachment->setClearColor(MTL.ClearColor{
+            f64(desc.clear_color.r),
+            f64(desc.clear_color.g),
+            f64(desc.clear_color.b),
+            f64(desc.clear_color.a),
+        })
+        color_attachment->setStoreAction(.StoreAndMultisampleResolve)
+    } else {
+        assert(false, "MSAA Handle not set?")
+    }
+    
+    
+    // Depth
+    if desc.depth_texture.handle != nil {
+        depth_tex := cast(^MTL.Texture)desc.depth_texture.handle
+        depth_attachment->setTexture(depth_tex)
+        depth_attachment->setLoadAction(.Clear)
+        depth_attachment->setStoreAction(.DontCare)
+        depth_attachment->setClearDepth(1.0)
+    } else {
+        assert(false, "Depth Handle not set?")
+    }
+
+    return render_pass_descriptor
+}
 
 metal_init :: proc(window: ^Window) -> ^Renderer {
     renderer := new(Renderer)
@@ -113,109 +143,12 @@ metal_init :: proc(window: ^Window) -> ^Renderer {
     return renderer
 }
 
-
-@private
-state: ^MetalPlatform
-
-lighting_buffer :^MTL.Buffer
-create_depth_and_msaa_textures :: proc(platform: ^MetalPlatform) {
-    // msaa_texture_descriptor := NS.new(MTL.TextureDescriptor)
-    // msaa_texture_descriptor->setTextureType(.Type2DMultisample)
-    // msaa_texture_descriptor->setPixelFormat(.BGRA8Unorm)
-    // msaa_texture_descriptor->setWidth(NS.UInteger(platform.swapchain->frame().width))
-    // msaa_texture_descriptor->setHeight(NS.UInteger(platform.swapchain->frame().height))
-    // msaa_texture_descriptor->setSampleCount(4)
-    // msaa_texture_descriptor->setUsage({.RenderTarget})
-    // defer msaa_texture_descriptor->release()
-
-    // platform.msaa_render_target_texture = platform.device->newTexture(msaa_texture_descriptor);
-
-    // depth_texture_descriptor := NS.new(MTL.TextureDescriptor)
-    // depth_texture_descriptor->setTextureType(.Type2DMultisample)
-    // depth_texture_descriptor->setPixelFormat(.Depth32Float)
-    // depth_texture_descriptor->setWidth(NS.UInteger(platform.swapchain->frame().width))
-    // depth_texture_descriptor->setHeight(NS.UInteger(platform.swapchain->frame().height))
-    // depth_texture_descriptor->setSampleCount(4)
-    // depth_texture_descriptor->setUsage({.RenderTarget})
-    // defer depth_texture_descriptor->release()
-
-    // platform.depth_texture = platform.device->newTexture(depth_texture_descriptor);
-}
-
-CUBE_INDICES :: []u32 {
-    // Front
-    0, 1, 2,  2, 3, 0,
-    // Back
-    4, 5, 6,  6, 7, 4,
-    // Right
-    8, 9, 10,  10, 11, 8,
-    // Left
-    12, 13, 14,  14, 15, 12,
-    // Top
-    16, 17, 18,  18, 19, 16,
-    // Bottom
-    20, 21, 22,  22, 23, 20,
-
-}
-
-CUBE_VERTICES :: []Vertex {
-     // Front face (Z+)
-    {position={-0.5, -0.5,  0.5}, normal={ 0,  0,  1}, color={1, 1, 1, 1}, uvs={0.0, 0.0},},  // 0
-    {position={ 0.5, -0.5,  0.5}, normal={ 0,  0,  1}, color={1, 1, 1, 1}, uvs={1.0, 0.0},},  // 1
-    {position={ 0.5,  0.5,  0.5}, normal={ 0,  0,  1}, color={1, 1, 1, 1}, uvs={1.0, 1.0},},  // 2
-    {position={-0.5,  0.5,  0.5}, normal={ 0,  0,  1}, color={1, 1, 1, 1}, uvs={0.0, 1.0},},  // 3
-    
-    // Back face (Z-)
-    {position={ 0.5, -0.5, -0.5}, normal={ 0,  0, -1}, color={1, 1, 1, 1}, uvs={0.0, 0.0}, },  // 4
-    {position={-0.5, -0.5, -0.5}, normal={ 0,  0, -1}, color={1, 1, 1, 1}, uvs={1.0, 0.0}, },  // 5
-    {position={-0.5,  0.5, -0.5}, normal={ 0,  0, -1}, color={1, 1, 1, 1}, uvs={1.0, 1.0}, },  // 6
-    {position={ 0.5,  0.5, -0.5}, normal={ 0,  0, -1}, color={1, 1, 1, 1}, uvs={0.0, 1.0}, },  // 7
-    
-    // Right face (X+)
-    {position={ 0.5, -0.5,  0.5}, normal={ 1,  0,  0}, color={1, 1, 1, 1}, uvs={0.0, 0.0}, },  // 8
-    {position={ 0.5, -0.5, -0.5}, normal={ 1,  0,  0}, color={1, 1, 1, 1}, uvs={1.0, 0.0}, },  // 9
-    {position={ 0.5,  0.5, -0.5}, normal={ 1,  0,  0}, color={1, 1, 1, 1}, uvs={1.0, 1.0}, },  // 10
-    {position={ 0.5,  0.5,  0.5}, normal={ 1,  0,  0}, color={1, 1, 1, 1}, uvs={0.0, 1.0}, },  // 11
-    
-    // Left face (X-)
-    {position={-0.5, -0.5, -0.5}, normal={-1,  0,  0}, color={1, 1, 1, 1}, uvs={0.0, 0.0}, },  // 12
-    {position={-0.5, -0.5,  0.5}, normal={-1,  0,  0}, color={1, 1, 1, 1}, uvs={1.0, 0.0}, },  // 13
-    {position={-0.5,  0.5,  0.5}, normal={-1,  0,  0}, color={1, 1, 1, 1}, uvs={1.0, 1.0}, },  // 14
-    {position={-0.5,  0.5, -0.5}, normal={-1,  0,  0}, color={1, 1, 1, 1}, uvs={0.0, 1.0}, },  // 15
-    
-    // Top face (Y+)
-    {position={-0.5,  0.5,  0.5}, normal={ 0,  1,  0}, color={1, 1, 1, 1}, uvs={0.0, 0.0}, },  // 16
-    {position={ 0.5,  0.5,  0.5}, normal={ 0,  1,  0}, color={1, 1, 1, 1}, uvs={1.0, 0.0}, },  // 17
-    {position={ 0.5,  0.5, -0.5}, normal={ 0,  1,  0}, color={1, 1, 1, 1}, uvs={1.0, 1.0}, },  // 18
-    {position={-0.5,  0.5, -0.5}, normal={ 0,  1,  0}, color={1, 1, 1, 1}, uvs={0.0, 1.0}, },  // 19
-    
-    // Bottom face (Y-)
-    {position={-0.5, -0.5, -0.5}, normal={ 0, -1,  0}, color= {1, 1, 1, 1}, uvs={0.0, 0.0}, },  // 20
-    {position={ 0.5, -0.5, -0.5}, normal={ 0, -1,  0}, color= {1, 1, 1, 1}, uvs={1.0, 0.0}, },  // 21
-    {position={ 0.5, -0.5,  0.5}, normal={ 0, -1,  0}, color= {1, 1, 1, 1}, uvs={1.0, 1.0}, },  // 22
-    {position={-0.5, -0.5,  0.5}, normal={ 0, -1,  0}, color= {1, 1, 1, 1}, uvs={0.0, 1.0}, },  // 23
-}
-
-clear_background :: proc(renderer: ^Renderer, color: Color) {
-    renderer.clear_color = color
-}
-
-color_to_clear_color :: proc(color: Color) -> MTL.ClearColor {
-    return MTL.ClearColor {
-        f64(color.r) / 255.0,
-        f64(color.g) / 255.0,
-        f64(color.b) / 255.0,
-        f64(color.a) / 255.0,
-    }
-}
-
 update_render_pass_descriptor :: proc(desc: Update_Renderpass_Desc) {
     pass_desc := cast(^MTL.RenderPassDescriptor)desc.renderpass_descriptor
 
     pass_desc->colorAttachments()->object(0)->setTexture(cast(^MTL.Texture)desc.msaa_texture.handle);
     pass_desc->colorAttachments()->object(0)->setResolveTexture(state.metalDrawable->texture());
-    pass_desc->depthAttachment()->setTexture(cast(^MTL.Texture)desc.depth_texture.handle);
-    
+    pass_desc->depthAttachment()->setTexture(cast(^MTL.Texture)desc.depth_texture.handle);   
 }
 
 metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
@@ -241,8 +174,6 @@ metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
 
     execute_commands(&cmd_buffer)  
 }
-
-import "core:mem"
 
 Uniforms :: struct #align(16) {
     projection_matrix: linalg.Matrix4x4f32,
@@ -299,21 +230,6 @@ LightingData :: struct #align(16) {
     ambient_color: [3]f32,
     _: f32,
     ambient_intensity: f32,
-}
-
-import "core:math"
-import "core:math/rand"
-
-clean_up :: proc(renderer: ^Renderer) {
-    platform := cast(^MetalPlatform)renderer.platform
-
-    //platform.msaa_render_target_texture->release()
-    //platform.depth_texture->release()
-    
-   
-    //renderPassDescriptor->release();
-    
-    platform.device->release()
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -406,9 +322,9 @@ metal_create_sampler :: proc(desc: Sampler_Desc) -> Sampler {
     sampler_desc->setMipFilter(desc.mip_filter == .Linear ? .Linear : .Nearest)
     
     // Address modes
-    sampler_desc->setSAddressMode(metal_address_mode(desc.address_mode_u))
-    sampler_desc->setTAddressMode(metal_address_mode(desc.address_mode_v))
-    sampler_desc->setRAddressMode(metal_address_mode(desc.address_mode_w))
+    sampler_desc->setSAddressMode(metal_address_mode[desc.address_mode_u])
+    sampler_desc->setTAddressMode(metal_address_mode[desc.address_mode_v])
+    sampler_desc->setRAddressMode(metal_address_mode[desc.address_mode_w])
     
     // Anisotropy
     if desc.max_anisotropy > 1 {
@@ -417,17 +333,16 @@ metal_create_sampler :: proc(desc: Sampler_Desc) -> Sampler {
     
     metal_sampler := state.device->newSamplerState(sampler_desc)
     
-    return Sampler{handle = metal_sampler}
+    return Sampler {
+        handle = metal_sampler
+    }
 }
 
-metal_address_mode :: proc(mode: Sampler_Address_Mode) -> MTL.SamplerAddressMode {
-    switch mode {
-    case .Repeat:       return .Repeat
-    case .MirrorRepeat: return .MirrorRepeat
-    case .ClampToEdge:  return .ClampToEdge
-    case .ClampToBorder: return .ClampToBorderColor
-    }
-    return .Repeat
+metal_address_mode := [Sampler_Address_Mode]MTL.SamplerAddressMode {
+    .Repeat         = .Repeat,
+    .MirrorRepeat   = .MirrorRepeat,
+    .ClampToEdge    = .ClampToEdge,
+    .ClampToBorder  = .ClampToBorderColor
 }
 
 metal_destroy_sampler :: proc(sampler: ^Sampler) {
@@ -439,12 +354,11 @@ metal_destroy_sampler :: proc(sampler: ^Sampler) {
 
 ////////////////////////////////
 
-
-metal_compile_shader :: proc(desc: Shader_Desc) -> (Shader, bool) {
+metal_compile_shader :: proc(desc: ShaderDesc) -> (Shader, bool) {
     assert(state.device != nil)
     
     // For Metal, we need .metal source or precompiled .metallib
-    if desc.source_type != .MSL {
+    if desc.shader_language != .MSL {
         log.panic("Metal backend requires MSL shaders")
     }
     
@@ -464,8 +378,6 @@ metal_compile_shader :: proc(desc: Shader_Desc) -> (Shader, bool) {
         log.panicf("Shader compilation error: %v", err->localizedDescription()->odinString())
     }
 
-
-
     function_name := NS.String.alloc()->initWithOdinString(desc.entry_point)
     function := library->newFunctionWithName(function_name)
     if function == nil {
@@ -480,7 +392,7 @@ metal_compile_shader :: proc(desc: Shader_Desc) -> (Shader, bool) {
 
 ///////////////////////////////////////////////
 
-metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
+metal_create_pipeline :: proc(desc: PipelineDesc) -> Pipeline {
     log.infof("Creating pipeline: %s", fmt.tprintf(desc.label))
     assert(state.device != nil, "Device not initialized")
     
@@ -506,7 +418,7 @@ metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
         
         for attr, i in desc.vertex_attributes {
             mtl_attr := vertex_desc->attributes()->object(NS.UInteger(i))
-            mtl_attr->setFormat(metal_vertex_format(attr.format))
+            mtl_attr->setFormat(metal_vertex_format[attr.format])
             mtl_attr->setOffset(NS.UInteger(attr.offset))
             mtl_attr->setBufferIndex(NS.UInteger(attr.binding))
 
@@ -527,29 +439,28 @@ metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
         log.info("✓ Vertex descriptor set")
     }
 
-    //assert(len(desc.color_formats) > 0, "No color formats specified")
+    assert(len(desc.color_formats) > 0, "No color formats specified")
     
     color_attachment := render_pipeline_desc->colorAttachments()->object(0)
     color_attachment->setPixelFormat(state.swapchain->pixelFormat())
 
     // Color attachments
-    // for format, i in desc.color_formats { 
-        // TODO color blend options
-        // if i < len(desc.blend_states) {
-        //     blend := desc.blend_states[i]
-        //     color_attachment->setBlendingEnabled(blend.enabled)
+    for format, i in desc.color_formats { 
+        if i < len(desc.blend_states) {
+            blend := desc.blend_states[i]
+            color_attachment->setBlendingEnabled(blend.enabled)
             
-        //     if blend.enabled {
-        //         color_attachment->setSourceRGBBlendFactor(metal_blend_factor(blend.src_color))
-        //         color_attachment->setDestinationRGBBlendFactor(metal_blend_factor(blend.dst_color))
-        //         color_attachment->setRgbBlendOperation(metal_blend_op(blend.color_op))
+            if blend.enabled {
+                color_attachment->setSourceRGBBlendFactor(metal_blend_factor[blend.src_color])
+                color_attachment->setDestinationRGBBlendFactor(metal_blend_factor[blend.dst_color])
+                color_attachment->setRgbBlendOperation(metal_blend_operation[blend.color_op])
                 
-        //         color_attachment->setSourceAlphaBlendFactor(metal_blend_factor(blend.src_alpha))
-        //         color_attachment->setDestinationAlphaBlendFactor(metal_blend_factor(blend.dst_alpha))
-        //         color_attachment->setAlphaBlendOperation(metal_blend_op(blend.alpha_op))
-        //     }
-        // }
-    // }
+                color_attachment->setSourceAlphaBlendFactor(metal_blend_factor[blend.src_alpha])
+                color_attachment->setDestinationAlphaBlendFactor(metal_blend_factor[blend.dst_alpha])
+                color_attachment->setAlphaBlendOperation(metal_blend_operation[blend.alpha_op])
+            }
+        }
+    }
     log.info("✓ Color attachments set")
 
     render_pipeline_desc->setSampleCount(NS.UInteger(desc.sample_count))
@@ -557,7 +468,7 @@ metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
 
     // Depth attachment
     if desc.depth_format != .RGBA8_UNorm {  // Has depth
-        render_pipeline_desc->setDepthAttachmentPixelFormat(metal_pixel_format(desc.depth_format))
+        render_pipeline_desc->setDepthAttachmentPixelFormat(metal_pixel_format[desc.depth_format])
     }
         
     // Create pipeline state
@@ -569,12 +480,11 @@ metal_create_pipeline :: proc(desc: Pipeline_Desc) -> Pipeline {
     depth_state: ^MTL.DepthStencilState
     if desc.depth_state.test_enabled {
         depth_desc := MTL.DepthStencilDescriptor.alloc()->init()
-        depth_desc->setDepthCompareFunction(metal_compare_op(desc.depth_state.compare_op))
+        depth_desc->setDepthCompareFunction(metal_compare_operation[desc.depth_state.compare_op])
         depth_desc->setDepthWriteEnabled(desc.depth_state.write_enabled)
         depth_state = state.device->newDepthStencilState(depth_desc)
     }
     
-    // Store both in handle (need custom struct)
     metal_pipeline := new(Metal_Pipeline)
     metal_pipeline.render_state = pipeline_state
     metal_pipeline.depth_state = depth_state
@@ -599,82 +509,64 @@ metal_destroy_pipeline :: proc(pipeline: ^Pipeline) {
     free(metal_pipeline)
 }
 
-metal_vertex_format :: proc(format: Vertex_Format) -> MTL.VertexFormat {
-    switch format {
-    case .Float:  return .Float
-    case .Float2: return .Float2
-    case .Float3: return .Float3
-    case .Float4: return .Float4
-    case .UInt:   return .UInt
-    case .UInt2:  return .UInt2
-    case .UInt3:  return .UInt3
-    case .UInt4:  return .UInt4
-    }
-    return .Invalid
+metal_vertex_format := [VertexFormat]MTL.VertexFormat {
+    .Float  = .Float,
+    .Float2 = .Float2,
+    .Float3 = .Float3,
+    .Float4 = .Float4,
+    .UInt   = .UInt,
+    .UInt2  = .UInt2,
+    .UInt3  = .UInt3,
+    .UInt4  = .UInt4,
 }
 
-metal_pixel_format :: proc(format: Pixel_Format) -> MTL.PixelFormat {
-    switch format {
-    case .RGBA8_UNorm:       return .RGBA8Unorm
-    case .RGBA8_UNorm_sRGB:  return .RGBA8Unorm_sRGB
-    case .BGRA8_UNorm:       return .BGRA8Unorm
-    case .BGRA8_UNorm_sRGB:  return .BGRA8Unorm_sRGB
-    case .RGBA16_Float:      return .RGBA16Float
-    case .RGBA32_Float:      return .RGBA32Float
-    case .Depth32_Float:     return .Depth32Float
-    case .Depth24_Stencil8:  return .Depth24Unorm_Stencil8
-    }
-    return .Invalid
+metal_pixel_format := [PixelFormat]MTL.PixelFormat {
+    .RGBA8_UNorm      = .RGBA8Unorm,
+    .RGBA8_UNorm_sRGB = .RGBA8Unorm_sRGB,
+    .BGRA8_UNorm      = .BGRA8Unorm,
+    .BGRA8_UNorm_sRGB = .BGRA8Unorm_sRGB,
+    .RGBA16_Float     = .RGBA16Float,
+    .RGBA32_Float     = .RGBA32Float,
+    .Depth32_Float    = .Depth32Float,
+    .Depth24_Stencil8 = .Depth24Unorm_Stencil8,
 }
 
-metal_blend_factor :: proc(factor: Blend_Factor) -> MTL.BlendFactor {
-    switch factor {
-    case .Zero:              return .Zero
-    case .One:               return .One
-    case .SrcColor:          return .SourceColor
-    case .OneMinusSrcColor:  return .OneMinusSourceColor
-    case .SrcAlpha:          return .SourceAlpha
-    case .OneMinusSrcAlpha:  return .OneMinusSourceAlpha
-    case .DstColor:          return .DestinationColor
-    case .OneMinusDstColor:  return .OneMinusDestinationColor
-    case .DstAlpha:          return .DestinationAlpha
-    case .OneMinusDstAlpha:  return .OneMinusDestinationAlpha
-    }
-    return .Zero
+metal_blend_factor := [BlendFactor]MTL.BlendFactor {
+    .Zero             = .Zero,
+    .One              = .One,
+    .SrcColor         = .SourceColor,
+    .OneMinusSrcColor = .OneMinusSourceColor,
+    .SrcAlpha         = .SourceAlpha,
+    .OneMinusSrcAlpha = .OneMinusSourceAlpha,
+    .DstColor         = .DestinationColor,
+    .OneMinusDstColor = .OneMinusDestinationColor,
+    .DstAlpha         = .DestinationAlpha,
+    .OneMinusDstAlpha = .OneMinusDestinationAlpha,
 }
 
-metal_blend_op :: proc(op: Blend_Op) -> MTL.BlendOperation {
-    switch op {
-    case .Add:             return .Add
-    case .Subtract:        return .Subtract
-    case .ReverseSubtract: return .ReverseSubtract
-    case .Min:             return .Min
-    case .Max:             return .Max
-    }
-    return .Add
+metal_blend_operation := [BlendOperation]MTL.BlendOperation {
+    .Add             = .Add,
+    .Subtract        = .Subtract,
+    .ReverseSubtract = .ReverseSubtract,
+    .Min             = .Min,
+    .Max             = .Max,
 }
 
-metal_cull_mode :: proc(mode: Cull_Mode) -> MTL.CullMode {
-    switch mode {
-    case .None:  return .None
-    case .Front: return .Front
-    case .Back:  return .Back
-    }
-    return .None
+metal_cull_mode := [CullMode]MTL.CullMode {
+    .None  = .None,
+    .Front = .Front,
+    .Back  = .Back,
 }
 
-metal_compare_op :: proc(op: Compare_Op) -> MTL.CompareFunction {
-    switch op {
-    case .Never:          return .Never
-    case .Less:           return .Less
-    case .Equal:          return .Equal
-    case .LessOrEqual:    return .LessEqual
-    case .Greater:        return .Greater
-    case .NotEqual:       return .NotEqual
-    case .GreaterOrEqual: return .GreaterEqual
-    case .Always:         return .Always
-    }
-    return .Always
+metal_compare_operation := [CompareOperation]MTL.CompareFunction {
+    .Never          = .Never,
+    .Less           = .Less,
+    .Equal          = .Equal,
+    .LessOrEqual    = .LessEqual,
+    .Greater        = .Greater,
+    .NotEqual       = .NotEqual,
+    .GreaterOrEqual = .GreaterEqual,
+    .Always         = .Always,
 }
 
 //////////////////////////////////////////
@@ -697,7 +589,7 @@ metal_create_texture :: proc(desc: Texture_Desc) -> Texture {
     }
     
     // Format
-    texture_desc->setPixelFormat(metal_pixel_format(desc.format))
+    texture_desc->setPixelFormat(metal_pixel_format[desc.format])
     
     // Custom dimensions?
     // Dimensions
@@ -751,17 +643,6 @@ metal_destroy_texture :: proc(texture: ^Texture) {
 
 ////////////////////////////////////////////////////////////////
 
-// command_executor_metal.odin
-
-Metal_Command_Executor :: struct {
-    device: ^MTL.Device,
-    command_queue: ^MTL.CommandQueue,
-    current_encoder: ^MTL.RenderCommandEncoder,
-    
-    // Cached state
-    current_pipeline: ^MTL.RenderPipelineState,
-}
-
 execute_commands :: proc(
     cb: ^Command_Buffer,
 ) {
@@ -770,237 +651,48 @@ execute_commands :: proc(
 
     for cmd in cb.commands {
         switch c in cmd {
-        case Update_Renderpass_Desc:
-            update_render_pass_descriptor(c)
+            case Update_Renderpass_Desc:
+                update_render_pass_descriptor(c)
 
-        case Begin_Pass_Command:
-            execute_begin_pass(command_buffer, c)
-            
-        case End_Pass_Command:
-            execute_end_pass()
+            case Begin_Pass_Command:
+                execute_begin_pass(command_buffer, c)
+                
+            case End_Pass_Command:
+                execute_end_pass()
 
-        case Set_Pipeline_Command:
-            execute_set_pipeline(c)
-            
-        case Set_Viewport_Command:
-            execute_set_viewport(c)
-            
-        case Bind_Vertex_Buffer_Command:
-            execute_bind_vertex_buffer(c)
-            
-        case Bind_Index_Buffer_Command:
-            execute_bind_index_buffer(c)
-            
-        case Bind_Texture_Command:
-            execute_bind_texture(c)
-            
-        case Set_Uniform_Command:
-            execute_set_uniform(c)
-            
-        case Draw_Command:
-            execute_draw(c)
-            
-        case Draw_Indexed_Command:
-            execute_draw_indexed(c)
-            
-        case Set_Scissor_Command:
-            execute_set_scissor(c)
+            case Set_Pipeline_Command:
+                execute_set_pipeline(c)
+                
+            case Set_Viewport_Command:
+                execute_set_viewport(c)
+                
+            case Bind_Vertex_Buffer_Command:
+                execute_bind_vertex_buffer(c)
+                
+            case Bind_Index_Buffer_Command:
+                execute_bind_index_buffer(c)
+                
+            case Bind_Texture_Command:
+                execute_bind_texture(c)
+                
+            case Set_Uniform_Command:
+                execute_set_uniform(c)
+                
+            case Draw_Command:
+                execute_draw(c)
+                
+            case Draw_Indexed_Command:
+                execute_draw_indexed(c)
 
-        case Render_Pass_MSAA_Desc:
-            //metal_begin_msaa_pass(command_buffer, c)
-
-        case Draw_Mesh_Command:
-            //execute_draw_mesh(c)
+            case Draw_Indexed_Instanced_Command:
+                execute_draw_indexed_instanced(c)
+                
+            case Set_Scissor_Command:
+                execute_set_scissor(c)
         }
     }
-    
     command_buffer->presentDrawable(state.metalDrawable)
     command_buffer->commit()
-}
-
-execute_draw_mesh :: proc(executor: ^Metal_Command_Executor, cmd: Draw_Mesh_Command) {
-    assert(executor.current_encoder != nil, "No active render pass")
-    
-    // Bind vertex buffer
-    vb := cast(^MTL.Buffer)cmd.vertex_buffer.handle
-    executor.current_encoder->setVertexBuffer(vb, 0, 0)
-    
-    // Set transform uniform (binding 1)
-    m := cmd.transform
-    tbytes := mem.ptr_to_bytes(&m)
-    executor.current_encoder->setVertexBytes(
-        tbytes,
-        1,
-    )
-    
-    // Bind textures
-    if cmd.material.albedo_texture.handle != nil {
-        albedo := cast(^MTL.Texture)cmd.material.albedo_texture.handle
-        executor.current_encoder->setFragmentTexture(albedo, 0)
-    }
-    
-    if cmd.material.normal_texture.handle != nil {
-        normal := cast(^MTL.Texture)cmd.material.normal_texture.handle
-        executor.current_encoder->setFragmentTexture(normal, 1)
-    }
-    
-    if cmd.material.metallic_roughness_texture.handle != nil {
-        mr := cast(^MTL.Texture)cmd.material.metallic_roughness_texture.handle
-        executor.current_encoder->setFragmentTexture(mr, 2)
-    }
-    
-    // Set material uniforms (binding 0)
-    material_data := struct {
-        albedo_color: [4]f32,
-        metallic: f32,
-        roughness: f32,
-        _padding: [2]f32,
-    }{
-        albedo_color = cmd.material.albedo_color,
-        metallic = cmd.material.metallic,
-        roughness = cmd.material.roughness,
-    }
-    
-    fbytes := mem.ptr_to_bytes(&material_data)
-    executor.current_encoder->setFragmentBytes(
-        fbytes,
-        0,
-    )
-    
-    // Bind sampler
-    if cmd.material.sampler.handle != nil {
-        sampler := cast(^MTL.SamplerState)cmd.material.sampler.handle
-        executor.current_encoder->setFragmentSamplerState(sampler, 0)
-    }
-    
-    // Draw indexed
-    ib := cast(^MTL.Buffer)cmd.index_buffer.handle
-    executor.current_encoder->drawIndexedPrimitives(
-        .Triangle,
-        NS.UInteger(cmd.index_count),
-        .UInt32,
-        ib,
-        0,
-    )
-}
-
-Material :: struct {
-    albedo_texture: Texture,
-    normal_texture: Texture,
-    metallic_roughness_texture: Texture,
-    
-    // PBR parameters
-    albedo_color: [4]f32,
-    metallic: f32,
-    roughness: f32,
-    
-    // Optional
-    sampler: Sampler,
-}
-
-Mesh :: struct {
-    vertex_buffer: Buffer,
-    index_buffer: Buffer,
-    index_count: int,
-}
-
-next :: proc() {
-    state.metalDrawable = state.swapchain->nextDrawable()
-}
-
-metal_begin_msaa_pass :: proc(
-    encoder: ^^MTL.RenderCommandEncoder,
-    device: ^MTL.Device,
-    cmd_buffer: ^MTL.CommandBuffer,
-    desc: Render_Pass_MSAA_Desc,
-    drawable: ^CA.MetalDrawable,
-) {
-    render_pass := MTL.RenderPassDescriptor.renderPassDescriptor()
-    assert(render_pass != nil, "Failed to create render pass descriptor")
-    
-    // Color attachment (MSAA)
-    color_attachment := render_pass->colorAttachments()->object(0)
-    assert(color_attachment != nil, "Failed to get color attachment")
-    drawable_texture := drawable->texture()
-    assert(drawable_texture != nil, "Drawable has no texture")
-
-    color_attachment->setTexture(drawable_texture)
-    color_attachment->setLoadAction(.Clear)
-    color_attachment->setClearColor(MTL.ClearColor{
-        f64(desc.clear_color.r),
-        f64(desc.clear_color.g),
-        f64(desc.clear_color.b),
-        f64(desc.clear_color.a),
-    })
-    color_attachment->setStoreAction(.Store)
-    
-    encoder^ = cmd_buffer->renderCommandEncoderWithDescriptor(render_pass)
-    encoder^->setLabel(NS.AT("MSAA encoder"))
-
-    // Resolve to drawable or provided texture
-    if desc.resolve_texture.handle != nil {
-        resolve_texture := cast(^MTL.Texture)desc.resolve_texture.handle
-        color_attachment->setResolveTexture(resolve_texture)
-    } else {
-        color_attachment->setResolveTexture(drawable->texture())
-    }
-    msaa_texture := cast(^MTL.Texture)desc.msaa_texture.handle
-    
-    
-    // Depth attachment
-    depth_attachment := render_pass->depthAttachment()
-    depth_texture := cast(^MTL.Texture)desc.depth_texture.handle
-    depth_attachment->setTexture(depth_texture)
-    depth_attachment->setLoadAction(.Clear)
-    depth_attachment->setClearDepth(f64(desc.clear_depth))
-    depth_attachment->setStoreAction(.DontCare)
-    
-
-    depth_desc := MTL.DepthStencilDescriptor.alloc()->init()
-    depth_desc->setDepthCompareFunction(.Less)
-    depth_desc->setDepthWriteEnabled(true)
-    
-    depth_state := device->newDepthStencilState(depth_desc)
-    encoder^->setDepthStencilState(depth_state)
-}
-
-metal_create_renderpass_descriptor :: proc(desc: RenderPassDescriptor) -> rawptr {
-    render_pass_descriptor := MTL.RenderPassDescriptor.alloc()->init()
-    
-    color_attachment := render_pass_descriptor->colorAttachments()->object(0)
-    depth_attachment := render_pass_descriptor->depthAttachment()
-    
-    // MSAA or direct rendering
-
-    if desc.msaa_texture.handle != nil {
-        msaa_tex := cast(^MTL.Texture)desc.msaa_texture.handle
-        color_attachment->setTexture(msaa_tex)
-        color_attachment->setResolveTexture(state.metalDrawable->texture())
-        color_attachment->setLoadAction(.Clear)
-        color_attachment->setClearColor(MTL.ClearColor{
-            f64(desc.clear_color.r),
-            f64(desc.clear_color.g),
-            f64(desc.clear_color.b),
-            f64(desc.clear_color.a),
-        })
-        color_attachment->setStoreAction(.StoreAndMultisampleResolve)
-    } else {
-        assert(false, "MSAA Handle not set?")
-    }
-    
-    
-    // Depth
-    if desc.depth_texture.handle != nil {
-        depth_tex := cast(^MTL.Texture)desc.depth_texture.handle
-        depth_attachment->setTexture(depth_tex)
-        depth_attachment->setLoadAction(.Clear)
-        depth_attachment->setStoreAction(.DontCare)
-        depth_attachment->setClearDepth(1.0)
-    } else {
-        assert(false, "Depth Handle not set?")
-    }
-
-    return render_pass_descriptor
 }
 
 @(private)
@@ -1025,7 +717,7 @@ execute_set_pipeline :: proc(cmd: Set_Pipeline_Command) {
     metal_pipeline := cast(^Metal_Pipeline)cmd.pipeline.handle
     state.encoder->setRenderPipelineState(metal_pipeline.render_state)
     
-    state.encoder->setCullMode(metal_cull_mode(cmd.pipeline.desc.cull_mode))
+    state.encoder->setCullMode(metal_cull_mode[cmd.pipeline.desc.cull_mode])
     state.encoder->setFrontFacingWinding(
         cmd.pipeline.desc.front_face == .Clockwise ? .Clockwise : .CounterClockwise
     )
@@ -1059,7 +751,8 @@ execute_bind_vertex_buffer :: proc(cmd: Bind_Vertex_Buffer_Command) {
     )
 }
 
-@(private)execute_bind_index_buffer :: proc(cmd: Bind_Index_Buffer_Command) {
+@(private)
+execute_bind_index_buffer :: proc(cmd: Bind_Index_Buffer_Command) {
     // Index buffer is bound in draw call in Metal
     // Store for later
 }
@@ -1074,11 +767,9 @@ execute_bind_texture :: proc(cmd: Bind_Texture_Command) {
     case .Fragment:
         state.encoder->setFragmentTexture(metal_texture, NS.UInteger(cmd.slot))
     case .Compute:
-        // Not applicable for render encoder
+        assert(false)
     }
 }
-
-import "core:slice"
 
 @(private)
 execute_set_uniform :: proc(cmd: Set_Uniform_Command) {
@@ -1122,6 +813,19 @@ execute_draw_indexed :: proc(cmd: Draw_Indexed_Command) {
         .UInt32,  // Assuming 32-bit indices
         cast(^MTL.Buffer)cmd.index_buffer.handle,
         NS.UInteger(cmd.vertex_offset)
+    )
+}
+
+@(private)
+execute_draw_indexed_instanced :: proc(cmd: Draw_Indexed_Instanced_Command) {
+    // Assumes index buffer was bound earlier
+    state.encoder->drawIndexedPrimitivesWithInstanceCount(
+        .Triangle,
+        NS.UInteger(cmd.index_count),
+        .UInt32,  // Assuming 32-bit indices
+        cast(^MTL.Buffer)cmd.index_buffer.handle,
+        NS.UInteger(cmd.vertex_offset),
+        NS.UInteger(cmd.instance_count)
     )
 }
 

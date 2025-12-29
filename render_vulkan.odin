@@ -570,6 +570,8 @@ when ODIN_DEBUG {
 
 			return
 		}
+		vert_shader_code := []byte {}
+		frag_shader_code := []byte {}
 
 		vert_shader_module := create_shader_module(vert_shader_code)
 		frag_shader_module := create_shader_module(frag_shader_code)
@@ -746,6 +748,7 @@ when ODIN_DEBUG {
 
 	{	// Texture image
 		width, height, channels: i32
+		model_tex :cstring= ""
 		pixels := stbi.load(model_tex, &width, &height, &channels, 4)
 
 		if pixels == nil do log.panic("Couldnt load image")
