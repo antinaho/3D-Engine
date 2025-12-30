@@ -1,5 +1,11 @@
 package main
 
+LoadAction :: enum {
+    Load,
+    Clear,
+    DontCare,
+}
+
 VertexFormat :: enum {
     Float,
     Float2,

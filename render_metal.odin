@@ -19,32 +19,7 @@ import "core:slice"
 @(private="file")
 state: ^MetalPlatform
 
-metal_load_texture :: proc(desc: TextureLoadDesc) -> (texture: Texture) {
-    w, h, c: i32
 
-    pixels := stbi.load(strings.clone_to_cstring(desc.filepath, context.temp_allocator), &w, &h, &c, 4)
-    assert(pixels != nil, fmt.tprintf("Can't load texture from: %v", desc.filepath))
-
-    texture.desc.width = int(w)
-    texture.desc.height = int(h)
-
-    texture_descriptor := NS.new(MTL.TextureDescriptor)
-    texture_descriptor->setPixelFormat(metal_pixel_format[desc.format])
-    texture_descriptor->setWidth(NS.UInteger(w))
-    texture_descriptor->setHeight(NS.UInteger(h))
-    
-    tex := state.device->newTextureWithDescriptor(texture_descriptor)
-    region := MTL.Region{origin={0,0,0}, size={NS.Integer(w), NS.Integer(h), 1}}
-    bytes_per_row := 4 * w
-
-    tex->replaceRegion(region, 0, pixels, NS.UInteger(bytes_per_row))
-    texture.handle = tex
-
-    texture_descriptor->release()
-    stbi.image_free(pixels)
-
-    return
-}
 
 MetalAPI :: RendererAPI {
     draw = metal_draw,
@@ -238,8 +213,8 @@ MACOS :: #config(MACOS, true)
 
 metal_init_buffer :: proc(
     size: int,
-    usage: Buffer_Usage,
-    access: Buffer_Access,
+    usage: BufferKind,
+    access: BufferAccess,
 ) -> Buffer {
     assert(state.device != nil, "Metal device not initialized")
     
@@ -249,8 +224,6 @@ metal_init_buffer :: proc(
         storage_mode = MTL.ResourceStorageModePrivate // GPU only
     case .Dynamic:
         storage_mode = MTL.ResourceStorageModeShared
-    case .Staging:
-        storage_mode = MTL.ResourceStorageModeShared
     }
     
     // Create Metal buffer
@@ -258,20 +231,18 @@ metal_init_buffer :: proc(
         NS.UInteger(size),
         storage_mode,
     )
-    
-    if metal_buffer == nil {
-        log.panicf("Failed to create Metal buffer of size: %v", size)
-    }
+    assert(metal_buffer != nil, "Failed to create buffer")
     
     // Set debug label
-    label: string
-    switch usage {
-    case .Vertex:  label = "Vertex Buffer"
-    case .Index:   label = "Index Buffer"
-    case .Uniform: label = "Uniform Buffer"
-    case .Storage: label = "Storage Buffer"
+    when ODIN_DEBUG {
+        label: string
+        switch usage {
+        case .Vertex:  label = "Vertex Buffer"
+        case .Index:   label = "Index Buffer"
+        case .Uniform: label = "Uniform Buffer"
+        }
+        metal_buffer->setLabel(NS.alloc(NS.String)->initWithOdinString(label))
     }
-    metal_buffer->setLabel(NS.alloc(NS.String)->initWithOdinString(label))
     
     return Buffer{
         handle = metal_buffer,
@@ -282,18 +253,17 @@ metal_init_buffer :: proc(
 }
 
 metal_fill_buffer :: proc(buffer: ^Buffer, data: rawptr, size: int, offset: int) {
+    assert(buffer != nil, "Trying to fill null buffer.")
+
     metal_buffer := cast(^MTL.Buffer)buffer.handle
     assert(metal_buffer != nil, "Invalid Metal buffer")
     
     contents := metal_buffer->contents()
-    
-    // Copy data with offset
     dest := mem.ptr_offset(raw_data(contents), offset)
     mem.copy(dest, data, size)
     
-    // Synchronize if needed (for Managed storage mode)
+    // On MacOS, Shared buffers need manual sync. Not in iOS
     when MACOS {
-        // On macOS, Shared buffers need manual sync
         if buffer.access == .Dynamic {
             metal_buffer->didModifyRange(NS.Range{
                 location = NS.UInteger(offset),
@@ -304,7 +274,7 @@ metal_fill_buffer :: proc(buffer: ^Buffer, data: rawptr, size: int, offset: int)
 }
 
 metal_release_buffer :: proc(buffer: ^Buffer) {
-    if buffer.handle == nil do return
+    assert(buffer != nil, "Trying to release null buffer.")
     
     metal_buffer := cast(^MTL.Buffer)buffer.handle
     metal_buffer->release()
@@ -312,7 +282,7 @@ metal_release_buffer :: proc(buffer: ^Buffer) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-metal_create_sampler :: proc(desc: Sampler_Desc) -> Sampler {
+metal_create_sampler :: proc(desc: TextureSamplerDesc) -> TextureSampler {
     sampler_desc := MTL.SamplerDescriptor.alloc()->init()
     defer sampler_desc->release()
     
@@ -333,19 +303,19 @@ metal_create_sampler :: proc(desc: Sampler_Desc) -> Sampler {
     
     metal_sampler := state.device->newSamplerState(sampler_desc)
     
-    return Sampler {
+    return TextureSampler {
         handle = metal_sampler
     }
 }
 
-metal_address_mode := [Sampler_Address_Mode]MTL.SamplerAddressMode {
+metal_address_mode := [TextureSamplerAddressMode]MTL.SamplerAddressMode {
     .Repeat         = .Repeat,
     .MirrorRepeat   = .MirrorRepeat,
     .ClampToEdge    = .ClampToEdge,
     .ClampToBorder  = .ClampToBorderColor
 }
 
-metal_destroy_sampler :: proc(sampler: ^Sampler) {
+metal_destroy_sampler :: proc(sampler: ^TextureSampler) {
     if sampler.handle == nil do return
     metal_sampler := cast(^MTL.SamplerState)sampler.handle
     metal_sampler->release()
@@ -634,8 +604,34 @@ metal_create_texture :: proc(desc: Texture_Desc) -> Texture {
     }
 }
 
+metal_load_texture :: proc(desc: TextureLoadDesc) -> (texture: Texture) {
+    w, h, c: i32
+
+    pixels := stbi.load(strings.clone_to_cstring(desc.filepath, context.temp_allocator), &w, &h, &c, 4)
+    assert(pixels != nil, fmt.tprintf("Can't load texture from: %v", desc.filepath))
+    defer stbi.image_free(pixels)
+
+    texture.desc.width = int(w)
+    texture.desc.height = int(h)
+
+    texture_descriptor := NS.new(MTL.TextureDescriptor)
+    defer texture_descriptor->release()
+    texture_descriptor->setPixelFormat(metal_pixel_format[desc.format])
+    texture_descriptor->setWidth(NS.UInteger(w))
+    texture_descriptor->setHeight(NS.UInteger(h))
+    
+    tex := state.device->newTextureWithDescriptor(texture_descriptor)
+    region := MTL.Region{origin={0,0,0}, size={NS.Integer(w), NS.Integer(h), 1}}
+    bytes_per_row := 4 * w
+
+    tex->replaceRegion(region, 0, pixels, NS.UInteger(bytes_per_row))
+    texture.handle = tex
+
+    return
+}
+
 metal_destroy_texture :: proc(texture: ^Texture) {
-    if texture.handle == nil do return
+    assert(texture.handle != nil, "Trying to release null texture.")
     metal_texture := cast(^MTL.Texture)texture.handle
     metal_texture->release()
     texture.handle = nil
@@ -644,50 +640,53 @@ metal_destroy_texture :: proc(texture: ^Texture) {
 ////////////////////////////////////////////////////////////////
 
 execute_commands :: proc(
-    cb: ^Command_Buffer,
+    cb: ^CommandBuffer,
 ) {
     command_buffer := state.command_queue->commandBuffer()
     assert(command_buffer != nil, "Failed to create command buffer")
 
-    for cmd in cb.commands {
+    for cmd in cb {
         switch c in cmd {
             case Update_Renderpass_Desc:
                 update_render_pass_descriptor(c)
 
-            case Begin_Pass_Command:
+            case BeginPassCommand:
                 execute_begin_pass(command_buffer, c)
                 
-            case End_Pass_Command:
+            case EndPassCommand:
                 execute_end_pass()
 
-            case Set_Pipeline_Command:
+            case SetPipelineCommand:
                 execute_set_pipeline(c)
                 
-            case Set_Viewport_Command:
+            case SetViewportCommand:
                 execute_set_viewport(c)
                 
-            case Bind_Vertex_Buffer_Command:
+            case BindVertexBufferCommand:
                 execute_bind_vertex_buffer(c)
                 
-            case Bind_Index_Buffer_Command:
+            case BindIndexBufferCommand:
                 execute_bind_index_buffer(c)
                 
-            case Bind_Texture_Command:
+            case BindTextureCommand:
                 execute_bind_texture(c)
+            
+            case BindSamplerCommand:
+                execute_bind_sampler(c)
                 
-            case Set_Uniform_Command:
+            case SetUniformCommand:
                 execute_set_uniform(c)
                 
-            case Draw_Command:
+            case DrawCommand:
                 execute_draw(c)
                 
-            case Draw_Indexed_Command:
+            case DrawIndexedCommand:
                 execute_draw_indexed(c)
 
-            case Draw_Indexed_Instanced_Command:
+            case DrawIndexedInstancedCommand:
                 execute_draw_indexed_instanced(c)
                 
-            case Set_Scissor_Command:
+            case SetScissorCommand:
                 execute_set_scissor(c)
         }
     }
@@ -698,7 +697,7 @@ execute_commands :: proc(
 @(private)
 execute_begin_pass :: proc(
     command_buffer: ^MTL.CommandBuffer,
-    cmd: Begin_Pass_Command,
+    cmd: BeginPassCommand,
 ) {
     state.encoder = command_buffer->renderCommandEncoderWithDescriptor(cast(^MTL.RenderPassDescriptor)cmd.renderpass_descriptor)
     
@@ -713,7 +712,7 @@ execute_end_pass :: proc() {
 }
 
 @(private)
-execute_set_pipeline :: proc(cmd: Set_Pipeline_Command) {
+execute_set_pipeline :: proc(cmd: SetPipelineCommand) {
     metal_pipeline := cast(^Metal_Pipeline)cmd.pipeline.handle
     state.encoder->setRenderPipelineState(metal_pipeline.render_state)
     
@@ -729,7 +728,7 @@ execute_set_pipeline :: proc(cmd: Set_Pipeline_Command) {
 }
 
 @(private)
-execute_set_viewport :: proc(cmd: Set_Viewport_Command) {
+execute_set_viewport :: proc(cmd: SetViewportCommand) {
     state.encoder->setViewport(MTL.Viewport{
         originX = f64(cmd.x),
         originY = f64(cmd.y),
@@ -741,7 +740,7 @@ execute_set_viewport :: proc(cmd: Set_Viewport_Command) {
 }
 
 @(private)
-execute_bind_vertex_buffer :: proc(cmd: Bind_Vertex_Buffer_Command) {
+execute_bind_vertex_buffer :: proc(cmd: BindVertexBufferCommand) {
     metal_buffer := cast(^MTL.Buffer)cmd.buffer.handle
 
     state.encoder->setVertexBuffer(
@@ -752,13 +751,12 @@ execute_bind_vertex_buffer :: proc(cmd: Bind_Vertex_Buffer_Command) {
 }
 
 @(private)
-execute_bind_index_buffer :: proc(cmd: Bind_Index_Buffer_Command) {
-    // Index buffer is bound in draw call in Metal
-    // Store for later
+execute_bind_index_buffer :: proc(cmd: BindIndexBufferCommand) {
+    // Not needed in Metal
 }
 
 @(private)
-execute_bind_texture :: proc(cmd: Bind_Texture_Command) {
+execute_bind_texture :: proc(cmd: BindTextureCommand) {
     metal_texture := cast(^MTL.Texture)cmd.texture.handle
     
     switch cmd.stage {
@@ -772,30 +770,33 @@ execute_bind_texture :: proc(cmd: Bind_Texture_Command) {
 }
 
 @(private)
-execute_set_uniform :: proc(cmd: Set_Uniform_Command) {
+execute_bind_sampler :: proc(cmd: BindSamplerCommand) {
+    metal_sampler := cast(^MTL.SamplerState)cmd.sampler.handle
+    state.encoder->setFragmentSamplerState(metal_sampler, NS.UInteger(cmd.slot))
+}
+
+@(private)
+execute_set_uniform :: proc(cmd: SetUniformCommand) {
     switch cmd.stage {
     case .Vertex:
-        b := slice.bytes_from_ptr(cmd.data, cmd.size)
         state.encoder->setVertexBytes(
-            b,
+            slice.bytes_from_ptr(cmd.data, cmd.size),
             NS.UInteger(cmd.slot),
         )
     case .Fragment:
-        b := slice.bytes_from_ptr(cmd.data, cmd.size)
         state.encoder->setFragmentBytes(
-            b,
+            slice.bytes_from_ptr(cmd.data, cmd.size),
             NS.UInteger(cmd.slot),
         )
     case .Compute:
-        // Not applicable
+        assert(false, "Trying to set uniform for Compute buffer")
     }
     
-    // Free the copied data
     free(cmd.data)
 }
 
 @(private)
-execute_draw :: proc(cmd: Draw_Command) {
+execute_draw :: proc(cmd: DrawCommand) {
 
     state.encoder->drawPrimitives(
         .Triangle,
@@ -805,7 +806,7 @@ execute_draw :: proc(cmd: Draw_Command) {
 }
 
 @(private)
-execute_draw_indexed :: proc(cmd: Draw_Indexed_Command) {
+execute_draw_indexed :: proc(cmd: DrawIndexedCommand) {
     // Assumes index buffer was bound earlier
     state.encoder->drawIndexedPrimitives(
         .Triangle,
@@ -817,7 +818,7 @@ execute_draw_indexed :: proc(cmd: Draw_Indexed_Command) {
 }
 
 @(private)
-execute_draw_indexed_instanced :: proc(cmd: Draw_Indexed_Instanced_Command) {
+execute_draw_indexed_instanced :: proc(cmd: DrawIndexedInstancedCommand) {
     // Assumes index buffer was bound earlier
     state.encoder->drawIndexedPrimitivesWithInstanceCount(
         .Triangle,
@@ -830,7 +831,7 @@ execute_draw_indexed_instanced :: proc(cmd: Draw_Indexed_Instanced_Command) {
 }
 
 @(private)
-execute_set_scissor :: proc(cmd: Set_Scissor_Command) {
+execute_set_scissor :: proc(cmd: SetScissorCommand) {
     state.encoder->setScissorRect(MTL.ScissorRect{
         x = NS.Integer(cmd.x),
         y = NS.Integer(cmd.y),

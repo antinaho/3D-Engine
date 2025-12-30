@@ -58,7 +58,7 @@ Renderer_3D :: struct {
     depth_texture: Texture,
     
     // Resources
-    default_sampler: Sampler,
+    default_sampler: TextureSampler,
     renderpass_descriptor: rawptr,
     custom_texture: Texture,
     
@@ -161,7 +161,7 @@ init_renderer_3d :: proc(
     })
     
     // Create default sampler
-    renderer.default_sampler = create_sampler(Sampler_Desc{
+    renderer.default_sampler = create_sampler(TextureSamplerDesc{
         min_filter = .Linear,
         mag_filter = .Linear,
         mip_filter = .Linear,
@@ -186,7 +186,7 @@ RenderPassDescriptor :: struct {
     name: string,
     clear_color: [4]f32,
     //clear_depth: f32,
-    load_action: Load_Action,
+    load_action: LoadAction,
     
     // Optional: For MSAA
     msaa_texture: Texture,

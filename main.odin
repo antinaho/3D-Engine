@@ -160,7 +160,7 @@ ApplicationWindow :: struct {
 	using _ : WindowInput,
 	layers: [dynamic]Layer,
 }
-cmd_buffer: Command_Buffer
+cmd_buffer: CommandBuffer
 Application :: struct {
 	ctx: runtime.Context,
 	windows: [dynamic]ApplicationWindow,
@@ -294,11 +294,9 @@ run :: proc() {
 	//defer destroy_renderer_3d(&render_pass_3d)
 
 	vertex_buf = init_buffer_with_size(size_of(Vertex) * 1000, .Vertex, .Dynamic)
-	uniform_buf = init_buffer_with_size(size_of(U), .Vertex, .Static)
-	instance_buf = init_buffer_with_size(size_of(I) * 1000, .Vertex, .Dynamic)
+	instance_buf = init_buffer_with_size(size_of(InstanceData) * 1000, .Vertex, .Dynamic)
 
-	index_buf = init_buffer_with_size(size_of(u32) * len(QuadIndeces), .Index, .Static)
-	fill_buffer(&index_buf, raw_data(QuadIndeces[:]), size_of(u32) * len(QuadIndeces))
+	index_buf = init_buffer_with_size(size_of(u32) * 1000, .Index, .Dynamic)
 
 	for !close_requested() {
 		free_all(context.temp_allocator)

@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:mem"
+import "core:math"
 
 ExampleLayer := Layer {
 	ingest_events = _events,
@@ -17,19 +18,16 @@ _events :: proc(input: ^WindowInput) {
 
 vertex_buf: Buffer
 index_buf: Buffer
-uniform_buf: Buffer
 instance_buf: Buffer
-
-import "core:math"
 
 RAD_TO_DEG :: math.RAD_PER_DEG
 
 Vector2 :: [2]f32
 Vector3 :: [3]f32
 
-VECTOR_RIGHT   :: Vector3{1, 0,  0}
-VECTOR_UP      :: Vector3{0, 1,  0}
-VECTOR_FORWARD :: Vector3{0, 0, -1}
+VECTOR_RIGHT   :: Vector3 {1, 0,  0}
+VECTOR_UP      :: Vector3 {0, 1,  0}
+VECTOR_FORWARD :: Vector3 {0, 0, -1}
 
 Position :: Vector3
 Rotation :: Vector3
@@ -47,7 +45,7 @@ Entity :: struct {
 
 quadA := Entity {
     position = {0, 0, 0},
-    rotation = {0, 20, 0},
+    rotation = {0, 0, 0},
     scale = {1, 1, 1},
 }
 
@@ -60,14 +58,8 @@ quadB := Entity {
 
 quadC := Entity {
     position = {-2, -1, 0},
-    rotation = {0, 0, 20},
-    scale = {1, 1, 1},
-}
-
-quads := [?]Entity {
-    quadA,
-    quadB,
-    quadC
+    rotation = {0, 0, -20},
+    scale = {.5, 2, 1},
 }
 
 _update :: proc(delta: f32) {
@@ -80,7 +72,6 @@ _update :: proc(delta: f32) {
     cmd_begin_pass(&cmd_buffer, "Test", render_pass_3d.renderpass_descriptor)
     cmd_set_pipeline(&cmd_buffer, render_pass_3d.pipeline)
 
-    // Frame uniform
     view := matrix_look_at(
             camera.position,
             camera.target,
@@ -89,44 +80,51 @@ _update :: proc(delta: f32) {
 
     proj := get_orthographic_projection(camera)
     
-    uniforms := U {
+    uniforms := UniformData {
         view = view,
         projection = proj,
     }
+    cmd_set_uniform(&cmd_buffer, uniforms, 1, .Vertex)
 
-    fill_buffer(&uniform_buf, &uniforms, size_of(U))
-    fill_buffer(&vertex_buf, raw_data(QuadVertices[:]), size_of(Vertex) * len(QuadVertices))
-    // Per entity
-    for quad, i in quads {
-        model := matrix_model(
-            quad.position,
-            quad.rotation * RAD_TO_DEG,
-            quad.scale
-        )
+    fill_buffer(&vertex_buf, raw_data(QuadVertices), size_of(Vertex) * len(QuadVertices), 0)
+    fill_buffer(&index_buf,  raw_data(QuadIndeces),  size_of(u32) * len(QuadIndeces), 0)
 
-        instance_data := I{model = model}
-        // Fill all instances at the same time? [dynamic]Instances -> fill
-        fill_buffer(&instance_buf, &instance_data, size_of(I), size_of(I) * i)
-        
+    instance_data := []InstanceData {
+        {
+            matrix_model(
+            quadA.position,
+            quadA.rotation * RAD_TO_DEG,
+            quadA.scale
+        )}, {
+            matrix_model(
+            quadB.position,
+            quadB.rotation * RAD_TO_DEG,
+            quadB.scale
+        )}, {
+            matrix_model(
+            quadC.position,
+            quadC.rotation * RAD_TO_DEG,
+            quadC.scale
+        )}
     }
+    fill_buffer(&instance_buf, raw_data(instance_data), size_of(InstanceData) * len(instance_data), 0)
 
     cmd_bind_vertex_buffer(&cmd_buffer, vertex_buf, 0, 0)
-    cmd_bind_vertex_buffer(&cmd_buffer, uniform_buf, 0, 1)
     cmd_bind_vertex_buffer(&cmd_buffer, instance_buf, 0, 2)
-
-    cmd_bind_index_buffer(&cmd_buffer, index_buf)
+    cmd_bind_index_buffer(&cmd_buffer, index_buf, 0)
     cmd_bind_texture(&cmd_buffer, render_pass_3d.custom_texture, 0, .Fragment)
+    cmd_bind_sampler(&cmd_buffer, render_pass_3d.default_sampler, 0, .Fragment)
 
-    cmd_draw_indexed_with_instances(&cmd_buffer, len(QuadIndeces), index_buf, len(quads))
+    cmd_draw_indexed_with_instances(&cmd_buffer, len(QuadIndeces), index_buf, len(instance_data))
 
     cmd_end_pass(&cmd_buffer)
 }
 
-I :: struct #align(16) {
+InstanceData :: struct #align(16) {
     model:      matrix[4, 4]f32,
 }
 
-U :: struct #align(16) {
+UniformData :: struct #align(16) {
     view:        matrix[4, 4]f32,
     projection:  matrix[4, 4]f32,
 }

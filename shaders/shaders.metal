@@ -199,7 +199,7 @@ using namespace metal;
 
 
 
-struct VM {
+struct VertexIn {
     float3 position;
  
     float3 normal;
@@ -209,7 +209,7 @@ struct VM {
     float2 ___pad;
 };
 
-struct VO {
+struct VertexOut {
     float4 position [[position]];
     float3 normal;
 
@@ -226,19 +226,19 @@ struct UniformData {
     float4x4 projection;
 };
 
-vertex VO vertex_m(
-    uint vid                  [[vertex_id]],
-    uint iid                  [[instance_id]],
+vertex VertexOut vertex_m(
+    uint vid                        [[vertex_id]],
+    uint iid                        [[instance_id]],
     
-    const device VM* vertices [[buffer(0)]],
+    const device VertexIn* vertices [[buffer(0)]],
     
-    constant UniformData&  uni           [[buffer(1)]],
-    constant InstanceData* inst          [[buffer(2)]]
+    constant UniformData&  uni      [[buffer(1)]],
+    constant InstanceData* inst     [[buffer(2)]]
 ) {
     
-    VM in = vertices[vid];
+    VertexIn in = vertices[vid];
     InstanceData i = inst[iid];
-    VO out;
+    VertexOut out;
 
     float4 world_pos = i.model * float4(in.position, 1.0);
 
@@ -254,11 +254,10 @@ vertex VO vertex_m(
 }
 
 fragment float4 fragment_m(
-    VO                  vert          [[stage_in]],
-    texture2d<float>    colorTexture  [[texture(0)]]
-    ) {
-    constexpr sampler textureSampler (mag_filter::linear,
-                                      min_filter::linear);
+    VertexOut         vert           [[stage_in]],
+    texture2d<float>  colorTexture   [[texture(0)]],
+    sampler           textureSampler [[sampler(0)]]
+) {
     const float4 colorSample = colorTexture.sample(textureSampler, vert.uvs);
     return colorSample;
 }

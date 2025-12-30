@@ -1,42 +1,39 @@
 package main
 
-Render_Command :: union {
-    Begin_Pass_Command,
-    End_Pass_Command,
+RenderCommand :: union {
+    BeginPassCommand,
+    EndPassCommand,
 
-    Set_Pipeline_Command,
-    Set_Viewport_Command,
-    Set_Scissor_Command,
+    SetPipelineCommand,
+    SetViewportCommand,
+    SetScissorCommand,
     
-    Bind_Vertex_Buffer_Command,
-    Bind_Index_Buffer_Command,
-    Bind_Texture_Command,
+    BindVertexBufferCommand,
+    BindIndexBufferCommand,
+    BindTextureCommand,
+    BindSamplerCommand,
 
-    Set_Uniform_Command,
+    SetUniformCommand,
     
-    Draw_Command,
-    Draw_Indexed_Command,
-    Draw_Indexed_Instanced_Command,
+    DrawCommand,
+    DrawIndexedCommand,
+    DrawIndexedInstancedCommand,
 
     Update_Renderpass_Desc
 }
 
-Command_Buffer :: struct {
-    commands: [dynamic]Render_Command,
+CommandBuffer :: distinct [dynamic]RenderCommand
+
+init_command_buffer :: proc() -> (command_buffer: CommandBuffer) {
+    return make(CommandBuffer, 0, 128)
 }
 
-init_command_buffer :: proc() -> Command_Buffer {
-    return Command_Buffer{
-        commands = make([dynamic]Render_Command, 0, 128),
-    }
+clear_command_buffer :: proc(cb: ^CommandBuffer) {
+    clear(cb)
 }
 
-reset_command_buffer :: proc(cb: ^Command_Buffer) {
-    clear(&cb.commands)
-}
-
-destroy_command_buffer :: proc(cb: ^Command_Buffer) {
-    delete(cb.commands)
+destroy_command_buffer :: proc(cb: ^CommandBuffer) {
+    delete(cb^)
 }
 
 /////////////////////////////////////////
@@ -44,53 +41,53 @@ destroy_command_buffer :: proc(cb: ^Command_Buffer) {
 // Individual command types
 
 // ===== Render Pass =====
-Begin_Pass_Command :: struct {
+BeginPassCommand :: struct {
     name: string,
     renderpass_descriptor: rawptr,
 }
 
-Load_Action :: enum {
-    Load,      // Keep existing content
-    Clear,     // Clear to color
-    DontCare,  // Undefined (fastest)
-}
-
-End_Pass_Command :: struct {}  // Empty marker
+EndPassCommand :: struct {}
 
 // ===== Pipeline State =====
-Set_Pipeline_Command :: struct {
+SetPipelineCommand :: struct {
     pipeline: Pipeline,
 }
 
-Set_Viewport_Command :: struct {
+SetViewportCommand :: struct {
     x, y: f32,
     width, height: f32,
 }
 
-Set_Scissor_Command :: struct {
+SetScissorCommand :: struct {
     x, y: int,
     width, height: int,
 }
 
 // ===== Resource Binding =====
-Bind_Vertex_Buffer_Command :: struct {
+BindVertexBufferCommand :: struct {
     buffer: Buffer,
     offset: int,
     binding: int,  // Binding point (0, 1, 2...)
 }
 
-Bind_Index_Buffer_Command :: struct {
+BindIndexBufferCommand :: struct {
     buffer: Buffer,
     offset: int,
 }
 
-Bind_Texture_Command :: struct {
+BindTextureCommand :: struct {
     texture: Texture,
     slot: int,  // Texture slot (0-7 typically)
     stage: ShaderStage,  // Vertex or Fragment
 }
 
-Set_Uniform_Command :: struct {
+BindSamplerCommand :: struct {
+    sampler: TextureSampler,
+    stage: ShaderStage,
+    slot: int,
+}
+
+SetUniformCommand :: struct {
     data: rawptr,
     size: int,
     slot: int,
@@ -98,19 +95,19 @@ Set_Uniform_Command :: struct {
 }
 
 // ===== Draw Calls =====
-Draw_Command :: struct {
+DrawCommand :: struct {
     vertex_count: int,
     first_vertex: int,
 }
 
-Draw_Indexed_Command :: struct {
+DrawIndexedCommand :: struct {
     index_count: int,
     first_index: int,
     vertex_offset: int,
     index_buffer: Buffer,
 }
 
-Draw_Indexed_Instanced_Command :: struct {
+DrawIndexedInstancedCommand :: struct {
     index_count: int,
     first_index: int,
     vertex_offset: int,
@@ -118,12 +115,12 @@ Draw_Indexed_Instanced_Command :: struct {
     instance_count: int,
 }
 
-Render_Pass_MSAA_Desc :: struct {
+RenderPassMSAADesc :: struct {
     name: string,
     clear_color: [4]f32,
     clear_depth: f32,
-    msaa_texture: Texture,      // MSAA render target
-    resolve_texture: Texture,   // Where to resolve (can be swapchain)
+    msaa_texture: Texture,
+    resolve_texture: Texture,
     depth_texture: Texture,
 }
 
@@ -131,43 +128,47 @@ Render_Pass_MSAA_Desc :: struct {
 
 // Helper functions to add commands
 
-cmd_begin_pass :: proc(cb: ^Command_Buffer, name: string, renderpass_descriptor: rawptr) {
-    append(&cb.commands, Begin_Pass_Command{
+cmd_begin_pass :: proc(cb: ^CommandBuffer, name: string, renderpass_descriptor: rawptr) {
+    append(cb, BeginPassCommand{
         name = name,
         renderpass_descriptor = renderpass_descriptor,
     })
 }
 
-cmd_end_pass :: proc(cb: ^Command_Buffer) {
-    append(&cb.commands, End_Pass_Command{})
+cmd_end_pass :: proc(cb: ^CommandBuffer) {
+    append(cb, EndPassCommand{})
 }
 
-cmd_set_pipeline :: proc(cb: ^Command_Buffer, pipeline: Pipeline) {
-    append(&cb.commands, Set_Pipeline_Command{pipeline})
+cmd_set_pipeline :: proc(cb: ^CommandBuffer, pipeline: Pipeline) {
+    append(cb, SetPipelineCommand{pipeline})
 }
 
-cmd_set_viewport :: proc(cb: ^Command_Buffer, x, y, width, height: f32) {
-    append(&cb.commands, Set_Viewport_Command{x, y, width, height})
+cmd_set_viewport :: proc(cb: ^CommandBuffer, x, y, width, height: f32) {
+    append(cb, SetViewportCommand{x, y, width, height})
 }
 
-cmd_bind_vertex_buffer :: proc(cb: ^Command_Buffer, buffer: Buffer, offset: int = 0, binding: int = 0) {
-    append(&cb.commands, Bind_Vertex_Buffer_Command{buffer, offset, binding})
+cmd_bind_vertex_buffer :: proc(cb: ^CommandBuffer, buffer: Buffer, offset: int, binding: int) {
+    append(cb, BindVertexBufferCommand{buffer, offset, binding})
 }
 
-cmd_bind_index_buffer :: proc(cb: ^Command_Buffer, buffer: Buffer, offset: int = 0) {
-    append(&cb.commands, Bind_Index_Buffer_Command{buffer, offset})
+cmd_bind_index_buffer :: proc(cb: ^CommandBuffer, buffer: Buffer, offset: int) {
+    append(cb, BindIndexBufferCommand{buffer, offset})
 }
 
-cmd_bind_texture :: proc(cb: ^Command_Buffer, texture: Texture, slot: int, stage: ShaderStage) {
-    append(&cb.commands, Bind_Texture_Command{texture, slot, stage})
+cmd_bind_texture :: proc(cb: ^CommandBuffer, texture: Texture, slot: int, stage: ShaderStage) {
+    append(cb, BindTextureCommand{texture, slot, stage})
 }
 
-cmd_set_uniform :: proc(cb: ^Command_Buffer, data: $T, slot: int, stage: ShaderStage) {
+cmd_bind_sampler :: proc(cb: ^CommandBuffer, sampler: TextureSampler, slot: int, stage: ShaderStage) {
+    append(cb, BindSamplerCommand{sampler, stage, slot})
+}
+
+cmd_set_uniform :: proc(cb: ^CommandBuffer, data: $T, slot: int, stage: ShaderStage) {
     // Copy uniform data (don't store pointer)
     uniform_data := new(T)
     uniform_data^ = data
     
-    append(&cb.commands, Set_Uniform_Command{
+    append(cb, SetUniformCommand{
         data = uniform_data,
         size = size_of(T),
         slot = slot,
@@ -175,15 +176,15 @@ cmd_set_uniform :: proc(cb: ^Command_Buffer, data: $T, slot: int, stage: ShaderS
     })
 }
 
-cmd_draw :: proc(cb: ^Command_Buffer, vertex_count: int) {
-    append(&cb.commands, Draw_Command{
+cmd_draw :: proc(cb: ^CommandBuffer, vertex_count: int) {
+    append(cb, DrawCommand{
         vertex_count = vertex_count,
         first_vertex = 0,
     })
 }
 
-cmd_draw_indexed :: proc(cb: ^Command_Buffer, index_count: int, index_buffer: Buffer) {
-    append(&cb.commands, Draw_Indexed_Command{
+cmd_draw_indexed :: proc(cb: ^CommandBuffer, index_count: int, index_buffer: Buffer) {
+    append(cb, DrawIndexedCommand{
         index_count = index_count,
         first_index = 0,
         vertex_offset = 0,
@@ -191,8 +192,8 @@ cmd_draw_indexed :: proc(cb: ^Command_Buffer, index_count: int, index_buffer: Bu
     })
 }
 
-cmd_draw_indexed_with_instances :: proc(cb: ^Command_Buffer, index_count: int, index_buffer: Buffer, instance_count: int) {
-    append(&cb.commands, Draw_Indexed_Instanced_Command{
+cmd_draw_indexed_with_instances :: proc(cb: ^CommandBuffer, index_count: int, index_buffer: Buffer, instance_count: int) {
+    append(cb, DrawIndexedInstancedCommand{
         index_count = index_count,
         first_index = 0,
         vertex_offset = 0,
@@ -201,13 +202,12 @@ cmd_draw_indexed_with_instances :: proc(cb: ^Command_Buffer, index_count: int, i
     })
 }
 
-
 Update_Renderpass_Desc :: struct {
     renderpass_descriptor: rawptr,
     msaa_texture: Texture,
     depth_texture: Texture,
 }
 
-cmd_update_renderpass_descriptors :: proc(cb: ^Command_Buffer, desc: Update_Renderpass_Desc) {
-    append(&cb.commands, desc)
+cmd_update_renderpass_descriptors :: proc(cb: ^CommandBuffer, desc: Update_Renderpass_Desc) {
+    append(cb, desc)
 }

@@ -1,38 +1,38 @@
 package main
 
-Sampler_Filter :: enum {
+TextureSamplerFilter :: enum {
     Nearest,
     Linear,
 }
 
-Sampler_Address_Mode :: enum {
+TextureSamplerAddressMode :: enum {
     Repeat,
     MirrorRepeat,
     ClampToEdge,
     ClampToBorder,
 }
 
-Sampler_Desc :: struct {
-    min_filter: Sampler_Filter,
-    mag_filter: Sampler_Filter,
-    mip_filter: Sampler_Filter,
-    address_mode_u: Sampler_Address_Mode,
-    address_mode_v: Sampler_Address_Mode,
-    address_mode_w: Sampler_Address_Mode,
+TextureSamplerDesc :: struct {
+    min_filter: TextureSamplerFilter,
+    mag_filter: TextureSamplerFilter,
+    mip_filter: TextureSamplerFilter,
+    address_mode_u: TextureSamplerAddressMode,
+    address_mode_v: TextureSamplerAddressMode,
+    address_mode_w: TextureSamplerAddressMode,
     max_anisotropy: int,
 }
 
-Sampler :: struct {
+TextureSampler :: struct {
     handle: rawptr,
 }
 
-create_sampler :: proc(desc: Sampler_Desc) -> Sampler {
+create_sampler :: proc(desc: TextureSamplerDesc) -> TextureSampler {
     when RENDERER == .Metal {
         return metal_create_sampler(desc)
     }
 }
 
-destroy_sampler :: proc(sampler: ^Sampler) {
+destroy_sampler :: proc(sampler: ^TextureSampler) {
     when RENDERER == .Metal {
         metal_destroy_sampler(sampler)
     }
