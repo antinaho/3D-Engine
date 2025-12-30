@@ -10,9 +10,38 @@ ExampleLayer := Layer {
 	update = _update,
 }
 
+import "core:math/rand"
+n: f32
 _events :: proc(input: ^WindowInput) {
+
+    if key_is_held(input, .LeftArrow) {
+        camera.position.x -= delta * 3.33
+    }
+    else if key_is_held(input, .RightArrow) {
+        camera.position.x += delta * 3.33    
+    }
+
+    if key_is_held(input, .UpArrow) {
+        camera.position.y += delta * 3.33
+    }
+    else if key_is_held(input, .DownArrow) {
+        camera.position.y -= delta * 3.33    
+    }
+    
+
 	if key_went_down(input, .E) {
-		fmt.println("Pressed E LayerOne")
+		//fmt.println("Pressed E LayerOne")
+        
+        for i in 0..<5 {
+            append(&instance_data, InstanceData {
+                matrix_model(
+                quad.position + {rand.float32() * f32(n), rand.float32() * f32(n), 0},
+                quad.rotation * RAD_TO_DEG,
+                quad.scale
+            )})
+            n += 0.125
+            
+        }        
 	}
 }
 
@@ -33,34 +62,45 @@ Position :: Vector3
 Rotation :: Vector3
 Scale    :: Vector3
 
+Entity :: struct {
+    using transform: Transform,
+    mesh: ^Mesh,
+}
+
 Transform :: struct {
     position: Position,
     rotation: Rotation,
     scale:    Scale,
 }
 
-Entity :: struct {
-    using transform: Transform,
+Mesh :: struct {
+    verteces: []Vertex,
+    indices: []u32,
 }
 
-quadA := Entity {
+QuadMesh :: Mesh {
+    verteces = []Vertex {
+        {position={-0.5, -0.5, 0}, normal={0,0,1}, color={1,1,1,1}, uvs={0,0}},
+        {position={ 0.5, -0.5, 0}, normal={0,0,1}, color={1,1,1,1}, uvs={1,0}},
+        {position={ 0.5,  0.5, 0}, normal={0,0,1}, color={1,1,1,1}, uvs={1,1}},
+        {position={-0.5,  0.5, 0}, normal={0,0,1}, color={1,1,1,1}, uvs={0,1}},
+    },
+    indices = []u32 {
+        0, 1, 2, 2, 3, 0,
+    },
+}
+
+@(rodata)
+quad_mesh := QuadMesh
+
+quad := Entity {
     position = {0, 0, 0},
     rotation = {0, 0, 0},
     scale = {1, 1, 1},
+    mesh = &quad_mesh,
 }
 
-quadB := Entity {
-    position = {2, 0, 0},
-    rotation = {0, 0, 10},
-    scale = {1, 1, 1},
-}
-
-
-quadC := Entity {
-    position = {-2, -1, 0},
-    rotation = {0, 0, -20},
-    scale = {.5, 2, 1},
-}
+instance_data: [dynamic]InstanceData
 
 _update :: proc(delta: f32) {
     cmd_update_renderpass_descriptors(&cmd_buffer, Update_Renderpass_Desc{
@@ -74,7 +114,7 @@ _update :: proc(delta: f32) {
 
     view := matrix_look_at(
             camera.position,
-            camera.target,
+            camera.position + VECTOR_FORWARD,
             VECTOR_UP
         )
 
@@ -86,27 +126,13 @@ _update :: proc(delta: f32) {
     }
     cmd_set_uniform(&cmd_buffer, uniforms, 1, .Vertex)
 
-    fill_buffer(&vertex_buf, raw_data(QuadVertices), size_of(Vertex) * len(QuadVertices), 0)
-    fill_buffer(&index_buf,  raw_data(QuadIndeces),  size_of(u32) * len(QuadIndeces), 0)
-
-    instance_data := []InstanceData {
-        {
-            matrix_model(
-            quadA.position,
-            quadA.rotation * RAD_TO_DEG,
-            quadA.scale
-        )}, {
-            matrix_model(
-            quadB.position,
-            quadB.rotation * RAD_TO_DEG,
-            quadB.scale
-        )}, {
-            matrix_model(
-            quadC.position,
-            quadC.rotation * RAD_TO_DEG,
-            quadC.scale
-        )}
+    if len(instance_data) == 0 {
+        cmd_end_pass(&cmd_buffer)
+        return
     }
+
+    fill_buffer(&vertex_buf, raw_data(QuadMesh.verteces), size_of(Vertex) * len(QuadMesh.verteces), 0)
+    fill_buffer(&index_buf,  raw_data(QuadMesh.indices),  size_of(u32) * len(QuadMesh.indices), 0)
     fill_buffer(&instance_buf, raw_data(instance_data), size_of(InstanceData) * len(instance_data), 0)
 
     cmd_bind_vertex_buffer(&cmd_buffer, vertex_buf, 0, 0)
@@ -115,7 +141,7 @@ _update :: proc(delta: f32) {
     cmd_bind_texture(&cmd_buffer, render_pass_3d.custom_texture, 0, .Fragment)
     cmd_bind_sampler(&cmd_buffer, render_pass_3d.default_sampler, 0, .Fragment)
 
-    cmd_draw_indexed_with_instances(&cmd_buffer, len(QuadIndeces), index_buf, len(instance_data))
+    cmd_draw_indexed_with_instances(&cmd_buffer, len(QuadMesh.indices), index_buf, len(instance_data))
 
     cmd_end_pass(&cmd_buffer)
 }
@@ -129,17 +155,6 @@ UniformData :: struct #align(16) {
     projection:  matrix[4, 4]f32,
 }
 
-QuadVertices := []Vertex {
-    {position={-0.5, -0.5, 0}, normal={1,1,1}, color={1,1,0.2,1},   uvs={0,0}},
-    {position={ 0.5, -0.5, 0}, normal={1,1,1}, color={0.2,0.2,1,1}, uvs={1,0}},
-    {position={ 0.5,  0.5, 0}, normal={1,1,1}, color={0.2,1,0.2,1}, uvs={1,1}},
-    {position={-0.5,  0.5, 0}, normal={1,1,1}, color={1,0.2,0.2,1}, uvs={0,1}},
-}
-
-QuadIndeces := []u32 {
-    0, 1, 2, 2, 3, 0,
-    4, 5, 6, 6, 7, 4,
-}
 
 main :: proc() {
     

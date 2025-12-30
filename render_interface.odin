@@ -14,7 +14,6 @@ when ODIN_OS == .Darwin {
 Renderer :: struct {
     using api: RendererAPI,
     platform: Platform,
-    clear_color: Color,
 }
 
 RendererAPI :: struct {
@@ -22,35 +21,15 @@ RendererAPI :: struct {
     cleanup: proc(window: ^Window, renderer: ^Renderer),
 }
 
-Color :: [4]u8
-
-PINK :: Color {255, 203, 196, 255}
-PEACH :: Color {255, 203, 165, 255}
-APINK :: Color {255, 152, 153, 255}
-DARKPURP :: Color {30, 25, 35, 255}
 
 
-Camera :: struct {
-    position: [3]f32,
-    target: [3]f32,
-    fov: f32,
-    zoom: f32,
-    aspect: f32,
-    near: f32,
-    far: f32,
-}
 
-camera := Camera {
-    position = {0, 0, 1},
-    target = {0, 0, 0},
-    aspect = 1280.0 / 720.0,
-    zoom = 5,
-    near = 0.1,
-    far = 100,
-    fov = 90,
-}
 
-Renderer_3D :: struct {
+
+
+
+
+DefaultRenderer :: struct {
     pipeline: Pipeline,
     
     // Render targets
@@ -67,23 +46,22 @@ Renderer_3D :: struct {
     index_buffer: Buffer,
 }
 
+DEFAULT_MSAA_SAMPLE_COUNT :: 4
 create_default_pipeline :: proc() -> Pipeline {
 
     vertex_shader, v_ok := load_shader("shaders/shaders.metal", .Vertex, "vertex_m")
     fragment_shader, f_ok := load_shader("shaders/shaders.metal", .Fragment, "fragment_m")
     
-    attributes := make([dynamic]VertexAttribute)
-    append(&attributes, VertexAttribute{format = .Float3, offset=offset_of(Vertex, position),  binding = 0})
-    append(&attributes, VertexAttribute{format = .Float3, offset=offset_of(Vertex, normal), binding = 0})
-    append(&attributes, VertexAttribute{format = .Float4, offset=offset_of(Vertex, color), binding = 0})
-    append(&attributes, VertexAttribute{format = .Float2, offset=offset_of(Vertex, uvs), binding = 0})
-    
-    layouts := make([dynamic]VertexLayout)
-    append(&layouts, VertexLayout{stride = size_of(Vertex), step_rate = .PerVertex})
+    attributes := []VertexAttribute {
+        {format = .Float3, offset=offset_of(Vertex, position),  binding = 0},
+        {format = .Float3, offset=offset_of(Vertex, normal), binding = 0},
+        {format = .Float4, offset=offset_of(Vertex, color), binding = 0},
+        {format = .Float2, offset=offset_of(Vertex, uvs), binding = 0},
+    }
 
-    MSAA_SAMPLE_COUNT :: 4
-
-
+    layouts := []VertexLayout {
+        {stride = size_of(Vertex), step_rate = .PerVertex}
+    }
 
     return create_pipeline(PipelineDesc{
         label = "3D Rendering Pipeline",
@@ -109,7 +87,7 @@ create_default_pipeline :: proc() -> Pipeline {
         },
 
         depth_format = .Depth32_Float,
-        sample_count = MSAA_SAMPLE_COUNT,  // MSAA
+        sample_count = DEFAULT_MSAA_SAMPLE_COUNT,  // MSAA
     })
 }
 
@@ -127,40 +105,39 @@ alpha_blend :: BlendState{
     alpha_op  = .Add,
 }
 
-import "core:log"
-import "core:fmt"
-init_renderer_3d :: proc(
+init_default_renderer :: proc(
     width: int,
     height: int,
-) -> (renderer: Renderer_3D) {
+) -> (renderer: DefaultRenderer) {
     
-    // Create pipeline with MSAA
+    // Pipeline
     renderer.pipeline = create_default_pipeline()
 
     // Create MSAA color target
-    renderer.msaa_render_target_texture = create_texture(Texture_Desc{
+    renderer.msaa_render_target_texture = create_texture(TextureDesc{
         format = .BGRA8_UNorm,
         usage = .RenderTarget,
         type = .Texture2DMultisample,
-        sample_count = 4,  // 4x MSAA
+        sample_count = DEFAULT_MSAA_SAMPLE_COUNT,
         mip_levels = 1,
     })
 
+    // Load texture
     renderer.custom_texture = load_texture(TextureLoadDesc{
-        filepath = "textures/face.jpg",
+        filepath = "textures/splash.png",
         format = .RGBA8_UNorm
     })
     
-    // Create depth buffer
-    renderer.depth_texture = create_texture(Texture_Desc{
+    // Create depth texture
+    renderer.depth_texture = create_texture(TextureDesc{
         format = .Depth32_Float,
         usage = .Depth,
         type = .Texture2DMultisample,
-        sample_count = 4,  // Match MSAA
+        sample_count = DEFAULT_MSAA_SAMPLE_COUNT,
         mip_levels = 1,
     })
     
-    // Create default sampler
+    // Create sampler
     renderer.default_sampler = create_sampler(TextureSamplerDesc{
         min_filter = .Linear,
         mag_filter = .Linear,
@@ -171,6 +148,7 @@ init_renderer_3d :: proc(
         max_anisotropy = 1,
     })
 
+    // Renderpass descriptor
     renderer.renderpass_descriptor = create_renderpass_descriptor(RenderPassDescriptor {
         name="Test",
         clear_color = {235 / 255.0, 177 / 255.0 , 136 / 255.0,1.0},
@@ -188,7 +166,6 @@ RenderPassDescriptor :: struct {
     //clear_depth: f32,
     load_action: LoadAction,
     
-    // Optional: For MSAA
     msaa_texture: Texture,
     depth_texture: Texture,
 }
@@ -201,13 +178,13 @@ create_renderpass_descriptor :: proc(desc: RenderPassDescriptor) -> rawptr {
     }
 }
 
-resize_renderer_3d :: proc(renderer: ^Renderer_3D, width: int, height: int) {
+resize_default_renderer :: proc(renderer: ^DefaultRenderer, width: int, height: int) {
     // Destroy old textures
     destroy_texture(&renderer.msaa_render_target_texture)
     destroy_texture(&renderer.depth_texture)
     
     // Recreate with new size
-    renderer.msaa_render_target_texture = create_texture(Texture_Desc{
+    renderer.msaa_render_target_texture = create_texture(TextureDesc{
         width = width,
         height = height,
         format = .BGRA8_UNorm_sRGB,
@@ -217,7 +194,7 @@ resize_renderer_3d :: proc(renderer: ^Renderer_3D, width: int, height: int) {
         mip_levels = 1,
     })
     
-    renderer.depth_texture = create_texture(Texture_Desc{
+    renderer.depth_texture = create_texture(TextureDesc{
         width = width,
         height = height,
         format = .Depth32_Float,
@@ -228,7 +205,7 @@ resize_renderer_3d :: proc(renderer: ^Renderer_3D, width: int, height: int) {
     })
 }
 
-destroy_renderer_3d :: proc(renderer: ^Renderer_3D) {
+destroy_default_renderer :: proc(renderer: ^DefaultRenderer) {
     destroy_pipeline(&renderer.pipeline)
     destroy_texture(&renderer.msaa_render_target_texture)
     destroy_texture(&renderer.depth_texture)

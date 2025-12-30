@@ -24,14 +24,17 @@ RenderCommand :: union {
 
 CommandBuffer :: distinct [dynamic]RenderCommand
 
+// Create default CommandBuffer
 init_command_buffer :: proc() -> (command_buffer: CommandBuffer) {
     return make(CommandBuffer, 0, 128)
 }
 
+// Clear buffer
 clear_command_buffer :: proc(cb: ^CommandBuffer) {
     clear(cb)
 }
 
+// Free buffer memory
 destroy_command_buffer :: proc(cb: ^CommandBuffer) {
     delete(cb^)
 }
@@ -64,10 +67,12 @@ SetScissorCommand :: struct {
 }
 
 // ===== Resource Binding =====
+// TODO: Probably just simplify all bindings to 1 struct BindBufferCommand?
+
 BindVertexBufferCommand :: struct {
     buffer: Buffer,
     offset: int,
-    binding: int,  // Binding point (0, 1, 2...)
+    binding: int,
 }
 
 BindIndexBufferCommand :: struct {
@@ -77,8 +82,8 @@ BindIndexBufferCommand :: struct {
 
 BindTextureCommand :: struct {
     texture: Texture,
-    slot: int,  // Texture slot (0-7 typically)
-    stage: ShaderStage,  // Vertex or Fragment
+    slot: int,
+    stage: ShaderStage,
 }
 
 BindSamplerCommand :: struct {
@@ -95,6 +100,7 @@ SetUniformCommand :: struct {
 }
 
 // ===== Draw Calls =====
+// TODO: Only support instance drawing since it seems preferred in Metal/DirectX?
 DrawCommand :: struct {
     vertex_count: int,
     first_vertex: int,
@@ -124,9 +130,13 @@ RenderPassMSAADesc :: struct {
     depth_texture: Texture,
 }
 
-///////////////////////////////////////
+Update_Renderpass_Desc :: struct {
+    renderpass_descriptor: rawptr,
+    msaa_texture: Texture,
+    depth_texture: Texture,
+}
 
-// Helper functions to add commands
+///////////////////////////////////////
 
 cmd_begin_pass :: proc(cb: ^CommandBuffer, name: string, renderpass_descriptor: rawptr) {
     append(cb, BeginPassCommand{
@@ -164,7 +174,6 @@ cmd_bind_sampler :: proc(cb: ^CommandBuffer, sampler: TextureSampler, slot: int,
 }
 
 cmd_set_uniform :: proc(cb: ^CommandBuffer, data: $T, slot: int, stage: ShaderStage) {
-    // Copy uniform data (don't store pointer)
     uniform_data := new(T)
     uniform_data^ = data
     
@@ -200,12 +209,6 @@ cmd_draw_indexed_with_instances :: proc(cb: ^CommandBuffer, index_count: int, in
         index_buffer = index_buffer,
         instance_count = instance_count,
     })
-}
-
-Update_Renderpass_Desc :: struct {
-    renderpass_descriptor: rawptr,
-    msaa_texture: Texture,
-    depth_texture: Texture,
 }
 
 cmd_update_renderpass_descriptors :: proc(cb: ^CommandBuffer, desc: Update_Renderpass_Desc) {

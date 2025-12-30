@@ -1,33 +1,33 @@
 package main
 
-Texture_Usage :: enum {
+TextureUsage :: enum {
     RenderTarget,
     Depth,
     ShaderRead,
     ShaderWrite,
 }
 
-Texture_Type :: enum {
+TextureType :: enum {
     Texture2D,
     TextureCube,
     Texture3D,
     Texture2DMultisample,
 }
 
-Texture_Desc :: struct {
+TextureDesc :: struct {
     width: int,
     height: int,
     //depth: int,
     format: PixelFormat,
-    usage: Texture_Usage,
-    type: Texture_Type,
-    sample_count: int,  // For MSAA
+    usage: TextureUsage,
+    type: TextureType,
+    sample_count: int,
     mip_levels: int,
 }
 
 Texture :: struct {
     handle: rawptr,
-    desc: Texture_Desc,
+    desc: TextureDesc,
 }
 
 TextureLoadDesc :: struct {
@@ -35,26 +35,23 @@ TextureLoadDesc :: struct {
     format: PixelFormat,
 }
 
+// Load texture from file
 load_texture :: proc(desc: TextureLoadDesc) -> Texture {
     when RENDERER == .Metal {
         return metal_load_texture(desc)
-    } else when RENDERER == .Vulkan {
-    
     }
 }
 
-create_texture :: proc(desc: Texture_Desc) -> Texture {
+// Create texture with TextureDesc
+create_texture :: proc(desc: TextureDesc) -> Texture {
     when RENDERER == .Metal {
         return metal_create_texture(desc)
-    } else when RENDERER == .Vulkan {
-        return vulkan_create_texture(desc)
     }
 }
 
+// Free texture memory
 destroy_texture :: proc(texture: ^Texture) {
     when RENDERER == .Metal {
         metal_destroy_texture(texture)
-    } else when RENDERER == .Vulkan {
-        vulkan_destroy_texture(texture)
     }
 }

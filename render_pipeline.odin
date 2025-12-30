@@ -136,19 +136,19 @@ PipelineDesc :: struct {
     
     // Color attachments
     color_formats: []PixelFormat,
-    blend_states: []BlendState,  // One per color attachment
+    blend_states: []BlendState,
     
     // Optional
     depth_format: PixelFormat,
-    sample_count: int,  // MSAA
+    sample_count: int,
     
     // Debug
     label: string,
 }
 
 Pipeline :: struct {
-    handle: rawptr,  // Backend-specific pipeline
-    desc: PipelineDesc,  // Keep for debugging
+    handle: rawptr,
+    desc: PipelineDesc,
 }
 
 // Create pipeline
@@ -162,6 +162,7 @@ create_pipeline :: proc(desc: PipelineDesc) -> Pipeline {
     }
 }
 
+// Free pipeline memory
 destroy_pipeline :: proc(pipeline: ^Pipeline) {
     when RENDERER == .Metal {
         metal_destroy_pipeline(pipeline)

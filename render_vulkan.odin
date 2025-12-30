@@ -1,5 +1,9 @@
 #+private file
 
+
+//TODO Redone everything
+// Just don't bother even looking here...
+
 package main
 
 import vk "vendor:vulkan"

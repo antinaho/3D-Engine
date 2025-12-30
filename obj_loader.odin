@@ -6,6 +6,8 @@ import "core:io"
 import "core:strconv"
 import "core:bufio"
 
+//TODO Fix everything... check out "tinyobjloader"
+
 Model :: struct {
     vertices: [dynamic][3]f32,
     vertex_index: u32,

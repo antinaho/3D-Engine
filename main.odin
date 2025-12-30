@@ -100,24 +100,26 @@ matrix_look_at :: proc(eye: [3]f32, target: [3]f32, up: [3]f32) -> matrix[4,4]f3
     r := linalg.normalize(linalg.cross(f, up))  // Right
     u := linalg.cross(r, f)  // Up
     
-    return matrix[4,4]f32{
-        r.x, u.x, -f.x, 0,
-        r.y, u.y, -f.y, 0,
-        r.z, u.z, -f.z, 0,
-        -linalg.dot(r, eye), -linalg.dot(u, eye), linalg.dot(f, eye), 1,
+    return matrix[4, 4]f32{
+        r.x,            r.y,         r.z,          -linalg.dot(r, eye),
+        u.x,            u.y,         u.z,          -linalg.dot(u, eye),
+        -f.x,           -f.y,        -f.z,         linalg.dot(f, eye),
+        0,              0,           0,            1,
+
     }
 }
 
 // Perspective projection (Metal uses depth [0, 1] and right-handed Y-up)
 matrix_perspective :: proc(fov_y_radians: f32, aspect: f32, near: f32, far: f32) -> matrix[4,4]f32 {
-    tan_half_fov := math.tan(fov_y_radians * 0.5)
+    tan_half_fov := math.tan(fov_y_radians / 2.0)
     
     return matrix[4,4]f32{
         1.0 / (aspect * tan_half_fov), 0, 0, 0,
         0, 1.0 / tan_half_fov, 0, 0,
         0, 0, far / (near - far), -1,
-        0, 0, (near * far) / (near - far), 0,
+		0, 0, -(far * near) / (far - near), 0,
     }
+
 }
 
 // Orthographic projection (Metal depth [0, 1])
@@ -186,8 +188,6 @@ create_window :: proc(width, height: int, title: string, allocator: runtime.Allo
 		renderer = renderer,
 		layers = make([dynamic]Layer, allocator)
 	}
-
-	renderer.clear_color = DARKPURP
 
 	append(&application.windows, application_window)
 	
@@ -286,7 +286,7 @@ Layer :: struct {
 	ingest_events: proc(input: ^WindowInput),
 }
 
-render_pass_3d: Renderer_3D
+render_pass_3d: DefaultRenderer
 
 run :: proc() {
 
@@ -295,8 +295,8 @@ run :: proc() {
 
 	vertex_buf = init_buffer_with_size(size_of(Vertex) * 1000, .Vertex, .Dynamic)
 	instance_buf = init_buffer_with_size(size_of(InstanceData) * 1000, .Vertex, .Dynamic)
-
 	index_buf = init_buffer_with_size(size_of(u32) * 1000, .Index, .Dynamic)
+	instance_data = make([dynamic]InstanceData)
 
 	for !close_requested() {
 		free_all(context.temp_allocator)

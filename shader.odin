@@ -5,7 +5,7 @@ import "core:strings"
 import "core:fmt"
 
 ShaderLanguage :: enum {
-    SPIRV,      // Vulkan native, can convert to others
+    SPIRV,      // Vulkan
     MSL,        // Metal Shading Language
     HLSL,       // Direct3D
 }
@@ -14,7 +14,7 @@ ShaderDesc :: struct {
     source: string,
     shader_language: ShaderLanguage,
     stage: ShaderStage,
-    entry_point: string,  // "main", "vertex_main", etc.
+    entry_point: string,
 }
 
 Shader :: struct {
@@ -25,15 +25,12 @@ Shader :: struct {
 compile_shader :: proc(desc: ShaderDesc) -> (Shader, bool) {
     when RENDERER == .Metal {
         return metal_compile_shader(desc)
-    } else when RENDERER == .Vulkan {
-        return vulkan_compile_shader(desc)
     }
 }
 
 load_shader :: proc(path: string, stage: ShaderStage, entry_point: string) -> (Shader, bool) {
     source, ok := os.read_entire_file(path, context.temp_allocator)
     assert(ok, fmt.tprintf("Cant open shader file at: %v", path))
-    if !ok do return {}, false
     
     // Detect type from extension
     source_type: ShaderLanguage

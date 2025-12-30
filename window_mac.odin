@@ -391,7 +391,6 @@ window_will_close :: proc (notification: ^NS.Notification) {
 
 ///////////////////
 // Resizing window
-import "core:fmt"
 window_did_resize :: proc (window: ^Window, notification: ^NS.Notification) {
 	platform := cast(^MacPlatform)window.platform
 	frame := platform.window->frame()

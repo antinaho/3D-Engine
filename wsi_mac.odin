@@ -3,7 +3,7 @@ package main
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
-// MAC GLFW -> VULKAN
+//TODO redo this too and move WSI info to window_interface if renderer needs it like vk extensions etc.
 
 VULKAN_WSI_MAC :: VulkanWSI {
 	get_global_proc_addresses = mac_vk_global_addresses,

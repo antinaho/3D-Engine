@@ -1,28 +1,24 @@
 package main
 
-import "base:runtime"
-import "core:math/linalg"
 import MTL "vendor:darwin/Metal"
 import CA "vendor:darwin/QuartzCore"
 import NS "core:sys/darwin/Foundation"
+import stbi "vendor:stb/image"
+
+import "base:runtime"
 
 import "core:fmt"
-import "core:os"
-import stbi "vendor:stb/image"
 import "core:log"
 import "core:mem"
-
-import "core:strings"
 import "core:slice"
-
+import "core:strings"
+import "core:math/linalg"
 
 @(private="file")
 state: ^MetalPlatform
 
-
-
 MetalAPI :: RendererAPI {
-    draw = metal_draw,
+    draw = _metal_draw,
     cleanup = _cleanup,
 }
 
@@ -30,62 +26,9 @@ MetalPlatform :: struct {
     device: ^MTL.Device,
     swapchain: ^CA.MetalLayer,
     command_queue: ^MTL.CommandQueue,
-    metalDrawable: ^CA.MetalDrawable,
+    drawable: ^CA.MetalDrawable,
 
     encoder: ^MTL.RenderCommandEncoder,
-}
-
-_cleanup :: proc(window: ^Window, renderer: ^Renderer) {
-    platform := cast(^MetalPlatform)renderer.platform
-
-    //platform.msaa_render_target_texture->release()
-    //platform.depth_texture->release()
-    //platform.renderPassDescriptor->release()
-    platform.swapchain->release()
-
-    platform.device->release()
-
-    free(platform)
-    free(renderer)
-}
-
-metal_create_renderpass_descriptor :: proc(desc: RenderPassDescriptor) -> rawptr {
-    render_pass_descriptor := MTL.RenderPassDescriptor.alloc()->init()
-    
-    color_attachment := render_pass_descriptor->colorAttachments()->object(0)
-    depth_attachment := render_pass_descriptor->depthAttachment()
-    
-    // MSAA or direct rendering
-
-    if desc.msaa_texture.handle != nil {
-        msaa_tex := cast(^MTL.Texture)desc.msaa_texture.handle
-        color_attachment->setTexture(msaa_tex)
-        color_attachment->setResolveTexture(state.metalDrawable->texture())
-        color_attachment->setLoadAction(.Clear)
-        color_attachment->setClearColor(MTL.ClearColor{
-            f64(desc.clear_color.r),
-            f64(desc.clear_color.g),
-            f64(desc.clear_color.b),
-            f64(desc.clear_color.a),
-        })
-        color_attachment->setStoreAction(.StoreAndMultisampleResolve)
-    } else {
-        assert(false, "MSAA Handle not set?")
-    }
-    
-    
-    // Depth
-    if desc.depth_texture.handle != nil {
-        depth_tex := cast(^MTL.Texture)desc.depth_texture.handle
-        depth_attachment->setTexture(depth_tex)
-        depth_attachment->setLoadAction(.Clear)
-        depth_attachment->setStoreAction(.DontCare)
-        depth_attachment->setClearDepth(1.0)
-    } else {
-        assert(false, "Depth Handle not set?")
-    }
-
-    return render_pass_descriptor
 }
 
 metal_init :: proc(window: ^Window) -> ^Renderer {
@@ -104,13 +47,13 @@ metal_init :: proc(window: ^Window) -> ^Renderer {
     platform.swapchain->setFramebufferOnly(true)
     platform.swapchain->setFrame(metalWindow->frame())
 
+    metalWindow->contentView()->setWantsLayer(true)
     metalWindow->contentView()->setLayer(platform.swapchain)
     metalWindow->setOpaque(true)
     metalWindow->setBackgroundColor(nil)
-    metalWindow->contentView()->setWantsLayer(true)
 
     platform.command_queue = platform.device->newCommandQueue()
-    platform.metalDrawable = platform.swapchain->nextDrawable()
+    platform.drawable = platform.swapchain->nextDrawable()
     
     renderer.api = MetalAPI
     state = platform
@@ -118,15 +61,19 @@ metal_init :: proc(window: ^Window) -> ^Renderer {
     return renderer
 }
 
-update_render_pass_descriptor :: proc(desc: Update_Renderpass_Desc) {
-    pass_desc := cast(^MTL.RenderPassDescriptor)desc.renderpass_descriptor
+//TODO actually cleanup and go over render_interface procs
+_cleanup :: proc(window: ^Window, renderer: ^Renderer) {
+    platform := cast(^MetalPlatform)renderer.platform
 
-    pass_desc->colorAttachments()->object(0)->setTexture(cast(^MTL.Texture)desc.msaa_texture.handle);
-    pass_desc->colorAttachments()->object(0)->setResolveTexture(state.metalDrawable->texture());
-    pass_desc->depthAttachment()->setTexture(cast(^MTL.Texture)desc.depth_texture.handle);   
+    platform.swapchain->release()
+
+    platform.device->release()
+
+    free(platform)
+    free(renderer)
 }
 
-metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
+_metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
     NS.scoped_autoreleasepool()
 
     platform := cast(^MetalPlatform)renderer.platform
@@ -135,13 +82,13 @@ metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
         return
     }
 
-    platform.metalDrawable = platform.swapchain->nextDrawable()
-    if platform.metalDrawable == nil {
+    platform.drawable = platform.swapchain->nextDrawable()
+    if platform.drawable == nil {
         log.warn("Warning: No drawable, skipping frame")
         return
     }
 
-    dtex := platform.metalDrawable->texture()
+    dtex := platform.drawable->texture()
     if dtex == nil {
         log.warn("Warning: Drawable texture is nil, skipping frame")
         return
@@ -150,29 +97,18 @@ metal_draw :: proc(window: ^Window, renderer: ^Renderer) {
     execute_commands(&cmd_buffer)  
 }
 
-Uniforms :: struct #align(16) {
-    projection_matrix: linalg.Matrix4x4f32,
-    view_matrix: linalg.Matrix4x4f32,
-    model_matrix: linalg.Matrix4x4f32,
-    
-    light_position: [4]f32,
-    light_direction: [4]f32,
-    time_data: [4]f32,
-
-    mat: [4]f32,
-}
-
-// Directional light (sun, moon)
+//TODO move to other file(s)
 DirectionalLight :: struct #align(16) {
-    direction: [3]f32,  // Direction the light points
+    direction: [3]f32,  
     _: f32,
-    color: [3]f32,      // RGB color
+
+    color: [3]f32,      
     _: f32,
-    intensity: f32,           // Brightness multiplier
+
+    intensity: f32, 
     _: [3]f32,
 }
 
-// Point light (lamp, torch)
 PointLight :: struct #align(16) {
     position: [3]f32,
     _: f32,
@@ -180,15 +116,14 @@ PointLight :: struct #align(16) {
     _: f32,
 
     intensity: f32,
-    constant: f32,    // Usually 1.0
-    linear: f32,      // Usually 0.09
-    quadratic: f32,   // Usually 0.032
+    constant: f32,  
+    linear: f32,    
+    quadratic: f32, 
     
-    radius: f32,      // Max distance
+    radius: f32, 
     _: [3]f32,
 }
 
-// Lighting data to pass to shaders
 LightingData :: struct #align(16) {
     // Directional lights
     point_lights: [16]PointLight,
@@ -283,6 +218,13 @@ metal_release_buffer :: proc(buffer: ^Buffer) {
 ///////////////////////////////////////////////////////////////////////////////
 
 metal_create_sampler :: proc(desc: TextureSamplerDesc) -> TextureSampler {
+    metal_address_mode := [TextureSamplerAddressMode]MTL.SamplerAddressMode {
+        .Repeat         = .Repeat,
+        .MirrorRepeat   = .MirrorRepeat,
+        .ClampToEdge    = .ClampToEdge,
+        .ClampToBorder  = .ClampToBorderColor
+    }
+
     sampler_desc := MTL.SamplerDescriptor.alloc()->init()
     defer sampler_desc->release()
     
@@ -308,15 +250,8 @@ metal_create_sampler :: proc(desc: TextureSamplerDesc) -> TextureSampler {
     }
 }
 
-metal_address_mode := [TextureSamplerAddressMode]MTL.SamplerAddressMode {
-    .Repeat         = .Repeat,
-    .MirrorRepeat   = .MirrorRepeat,
-    .ClampToEdge    = .ClampToEdge,
-    .ClampToBorder  = .ClampToBorderColor
-}
-
 metal_destroy_sampler :: proc(sampler: ^TextureSampler) {
-    if sampler.handle == nil do return
+    assert(sampler.handle != nil, "Trying to destroy null sampler.")
     metal_sampler := cast(^MTL.SamplerState)sampler.handle
     metal_sampler->release()
     sampler.handle = nil
@@ -332,8 +267,6 @@ metal_compile_shader :: proc(desc: ShaderDesc) -> (Shader, bool) {
         log.panic("Metal backend requires MSL shaders")
     }
     
-    // Compile at runtime
-
     log.info("LOADING SHADER LIB")
     library_desc := NS.new(MTL.CompileOptions)
     source := NS.String.alloc()->initWithOdinString(desc.source)
@@ -358,6 +291,45 @@ metal_compile_shader :: proc(desc: ShaderDesc) -> (Shader, bool) {
         handle = function,
         stage = desc.stage,
     }, true
+}
+
+///////////////////////////////////////////////
+
+metal_create_renderpass_descriptor :: proc(desc: RenderPassDescriptor) -> rawptr {
+    render_pass_descriptor := MTL.RenderPassDescriptor.alloc()->init()
+    
+    color_attachment := render_pass_descriptor->colorAttachments()->object(0)
+    depth_attachment := render_pass_descriptor->depthAttachment()
+    
+    // MSAA
+    if desc.msaa_texture.handle != nil {
+        msaa_tex := cast(^MTL.Texture)desc.msaa_texture.handle
+        color_attachment->setTexture(msaa_tex)
+        color_attachment->setResolveTexture(state.drawable->texture())
+        color_attachment->setLoadAction(.Clear)
+        color_attachment->setClearColor(MTL.ClearColor{
+            f64(desc.clear_color.r),
+            f64(desc.clear_color.g),
+            f64(desc.clear_color.b),
+            f64(desc.clear_color.a),
+        })
+        color_attachment->setStoreAction(.StoreAndMultisampleResolve)
+    } else {
+        assert(false, "MSAA Handle not set.")
+    }
+    
+    // Depth
+    if desc.depth_texture.handle != nil {
+        depth_tex := cast(^MTL.Texture)desc.depth_texture.handle
+        depth_attachment->setTexture(depth_tex)
+        depth_attachment->setLoadAction(.Clear)
+        depth_attachment->setStoreAction(.DontCare)
+        depth_attachment->setClearDepth(1.0)
+    } else {
+        assert(false, "Depth Handle not set.")
+    }
+
+    return render_pass_descriptor
 }
 
 ///////////////////////////////////////////////
@@ -541,7 +513,7 @@ metal_compare_operation := [CompareOperation]MTL.CompareFunction {
 
 //////////////////////////////////////////
 
-metal_create_texture :: proc(desc: Texture_Desc) -> Texture {
+metal_create_texture :: proc(desc: TextureDesc) -> Texture {
     assert(state.device != nil, "Device not initialized")
     texture_desc := MTL.TextureDescriptor.alloc()->init()
     defer texture_desc->release()
@@ -648,7 +620,7 @@ execute_commands :: proc(
     for cmd in cb {
         switch c in cmd {
             case Update_Renderpass_Desc:
-                update_render_pass_descriptor(c)
+                execute_update_renderpass_descriptor(c)
 
             case BeginPassCommand:
                 execute_begin_pass(command_buffer, c)
@@ -690,7 +662,7 @@ execute_commands :: proc(
                 execute_set_scissor(c)
         }
     }
-    command_buffer->presentDrawable(state.metalDrawable)
+    command_buffer->presentDrawable(state.drawable)
     command_buffer->commit()
 }
 
@@ -725,6 +697,15 @@ execute_set_pipeline :: proc(cmd: SetPipelineCommand) {
     if metal_pipeline.depth_state != nil {
         state.encoder->setDepthStencilState(metal_pipeline.depth_state)
     }
+}
+
+@(private)
+execute_update_renderpass_descriptor :: proc(desc: Update_Renderpass_Desc) {
+    pass_desc := cast(^MTL.RenderPassDescriptor)desc.renderpass_descriptor
+
+    pass_desc->colorAttachments()->object(0)->setTexture(cast(^MTL.Texture)desc.msaa_texture.handle);
+    pass_desc->colorAttachments()->object(0)->setResolveTexture(state.drawable->texture());
+    pass_desc->depthAttachment()->setTexture(cast(^MTL.Texture)desc.depth_texture.handle);   
 }
 
 @(private)
