@@ -5,7 +5,7 @@ import "core:log"
 import "core:mem"
 import "core:math"
 
-ExampleLayer := Layer {
+TestLayer := Layer {
 	ingest_events = _events,
 	update = _update,
 }
@@ -14,18 +14,19 @@ import "core:math/rand"
 n: f32
 _events :: proc(input: ^WindowInput) {
 
+    m: f32 = 3.33
     if key_is_held(input, .LeftArrow) {
-        camera.position.x -= delta * 3.33
+        main_camera.position.x -= delta * m
     }
     else if key_is_held(input, .RightArrow) {
-        camera.position.x += delta * 3.33    
+        main_camera.position.x += delta * m    
     }
 
     if key_is_held(input, .UpArrow) {
-        camera.position.y += delta * 3.33
+        main_camera.position.y += delta * m
     }
     else if key_is_held(input, .DownArrow) {
-        camera.position.y -= delta * 3.33    
+        main_camera.position.y -= delta * m    
     }
     
 
@@ -113,12 +114,12 @@ _update :: proc(delta: f32) {
     cmd_set_pipeline(&cmd_buffer, render_pass_3d.pipeline)
 
     view := matrix_look_at(
-            camera.position,
-            camera.position + VECTOR_FORWARD,
+            main_camera.position,
+            main_camera.position + VECTOR_FORWARD,
             VECTOR_UP
         )
 
-    proj := get_orthographic_projection(camera)
+    proj := get_orthographic_projection(main_camera)
     
     uniforms := UniformData {
         view = view,
@@ -173,7 +174,7 @@ main :: proc() {
 
     app_window := create_window(1280, 720, "Hellope", context.allocator, {.MainWindow})
 
-    add_layer(app_window, ExampleLayer)
+    add_layer(app_window, TestLayer)
 
     run()
 }

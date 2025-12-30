@@ -290,7 +290,7 @@ render_pass_3d: DefaultRenderer
 
 run :: proc() {
 
-	render_pass_3d = init_renderer_3d(1280, 720)
+	render_pass_3d = init_default_renderer(1280, 720)
 	//defer destroy_renderer_3d(&render_pass_3d)
 
 	vertex_buf = init_buffer_with_size(size_of(Vertex) * 1000, .Vertex, .Dynamic)
