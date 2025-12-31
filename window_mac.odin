@@ -17,6 +17,7 @@ MacWindowAPI :: WindowAPI {
 
 MacPlatform :: struct {
 	window: ^NS.Window,
+	mouse_position: NS.Point,
 }
 
 ns_app: ^NS.Application
@@ -31,6 +32,7 @@ _mac_get_events :: proc(w: ^Window) -> []Event {
 
 _mac_process_events :: proc(w: ^Window) {
 	event: ^NS.Event
+	platform := cast(^MacPlatform)w.platform
 	for {
 		event = ns_app->nextEventMatchingMask(NS.EventMaskAny, NS.Date_distantPast(), NS.DefaultRunLoopMode, true)
 		if event == nil { break }
@@ -40,17 +42,31 @@ _mac_process_events :: proc(w: ^Window) {
 				append(&w.events, KeyPressedEvent{key=code_to_keyboard_key[event->keyCode()]})
 			case .KeyUp:
 				append(&w.events, KeyReleasedEvent{key=code_to_keyboard_key[event->keyCode()]})
+			
+
 			case .LeftMouseDown:
 				append(&w.events, MousePressedEvent{button=code_to_mouse_button[MouseButton.Left]})
-			case .LeftMouseUp:
-				append(&w.events, MouseReleasedEvent{button=code_to_mouse_button[MouseButton.Left]})
+			case .LeftMouseUp, .RightMouseUp, .OtherMouseUp:
+				btn_n := event->buttonNumber()
+				append(&w.events, MouseReleasedEvent{button=code_to_mouse_button[int(btn_n)]})
 			case .RightMouseDown:
 				append(&w.events, MousePressedEvent{button=code_to_mouse_button[MouseButton.Right]})
-			case .RightMouseUp:
-				append(&w.events, MouseReleasedEvent{button=code_to_mouse_button[MouseButton.Right]})
-			case .MouseMoved:
-				position := event->locationInWindow()		
+
+
+			case .OtherMouseDown:
+				btn_n := event->buttonNumber()
+				append(&w.events, MousePressedEvent{button=code_to_mouse_button[int(btn_n)]})
+
+			
+			case .MouseMoved, .LeftMouseDragged, .RightMouseDragged, .OtherMouseDragged:
+				//TODO currently sending pixels idk should it be something else, gotta check with other resolution/screen sizes
+				position := event->locationInWindow()
+				delta_pixels := [2]NS.Float {position.x - platform.mouse_position.x, position.y - platform.mouse_position.y}
+				platform.mouse_position = position
+				
 				append(&w.events, MousePositionEvent{x=f64(position.x), y=f64(position.y)})
+				append(&w.events, MousePositionDeltaEvent{x=f64(delta_pixels.x), y=f64(delta_pixels.y)})
+
 			case .ScrollWheel:
 				scroll_x, scroll_y := event->scrollingDelta()
 				append(&w.events, MouseScrollEvent{x=f64(scroll_x), y=f64(scroll_y)})
@@ -189,7 +205,6 @@ window_create_mac :: proc(width, height: int, title: string, allocator: runtime.
 		}
 		NS.class_addMethod(class, intrinsics.objc_find_selector("windowDidChangeOcclusionState:"), auto_cast windowDidChangeOcclusionState, "v@:@")
 
-
 		NS.objc_registerClassPair(class)
 	}
 
@@ -212,8 +227,10 @@ window_create_mac :: proc(width, height: int, title: string, allocator: runtime.
 	}
 			
 	wd := cast(^GameWindowDelegate)del
-
+	
 	platform.window->setDelegate(wd)
+
+	platform.mouse_position = NS.Point {NS.Float(width / 2), NS.Float(height / 2)}
 
 	window.api = MacWindowAPI
 	window.platform = cast(Platform)platform
@@ -224,6 +241,7 @@ window_create_mac :: proc(width, height: int, title: string, allocator: runtime.
 
 // Cursed swamp
 
+@(private)
 class: ^intrinsics.objc_class
 		
 WindowEventsAPI :: struct {
@@ -245,10 +263,40 @@ WindowEventsAPI :: struct {
 	window_did_change_occlusion_state: proc(window: ^Window, notification: ^NS.Notification),
 }
 
-code_to_mouse_button := [3]MouseButton {
-	0 = .Left,
-	1 = .Right,
-} 
+code_to_mouse_button := [64]MouseButton {
+	0  = .Left,
+	1  = .Right,
+	2  = .Middle,
+	3  = .MouseOther_1,
+	4  = .MouseOther_2,
+	5  = .MouseOther_3,
+	6  = .MouseOther_4,
+	7  = .MouseOther_5,
+	8  = .MouseOther_6,
+	9  = .MouseOther_7,
+	10 = .MouseOther_8,
+	11 = .MouseOther_9,
+	12 = .MouseOther_10,
+	13 = .MouseOther_11,
+	14 = .MouseOther_12,
+	15 = .MouseOther_13,
+	16 = .MouseOther_14,
+	17 = .MouseOther_15,
+	18 = .MouseOther_16,
+	19 = .MouseOther_17,
+	20 = .MouseOther_18,
+	21 = .MouseOther_19,
+	22 = .MouseOther_20,
+	23 = .MouseOther_21,
+	24 = .MouseOther_22,
+	25 = .MouseOther_23,
+	26 = .MouseOther_24,
+	27 = .MouseOther_25,
+	28 = .MouseOther_26,
+	29 = .MouseOther_27,
+	30 = .MouseOther_28,
+	31 = .MouseOther_29
+}
 
 code_to_keyboard_key := [255]KeyboardKey {
 	NS.kVK.ANSI_1 				= .N1,

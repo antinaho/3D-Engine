@@ -19,7 +19,7 @@ Camera :: struct {
 //TODO init in main or somewhere else
 main_camera := Camera {
     position = {0, 0, 5},
-    rotation = {0, 0, 0},
+    rotation = {0, -90, 0},
 
 
     projection = .Orthographic,

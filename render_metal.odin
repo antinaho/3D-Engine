@@ -352,7 +352,7 @@ metal_create_pipeline :: proc(desc: PipelineDesc) -> Pipeline {
     render_pipeline_desc->setVertexFunction(vertex_shader)
     render_pipeline_desc->setFragmentFunction(fragment_shader)
     
-    log.info("✓ Shaders set")
+    log.info("-- Shaders set --")
 
     // Vertex descriptor
     if len(desc.vertex_attributes) > 0 {
@@ -378,7 +378,7 @@ metal_create_pipeline :: proc(desc: PipelineDesc) -> Pipeline {
         }
         
         render_pipeline_desc->setVertexDescriptor(vertex_desc)
-        log.info("✓ Vertex descriptor set")
+        log.info("-- Vertex descriptor set --")
     }
 
     assert(len(desc.color_formats) > 0, "No color formats specified")
@@ -403,10 +403,10 @@ metal_create_pipeline :: proc(desc: PipelineDesc) -> Pipeline {
             }
         }
     }
-    log.info("✓ Color attachments set")
+    log.info("-- Color attachments set --")
 
     render_pipeline_desc->setSampleCount(NS.UInteger(desc.sample_count))
-    //render_pipeline_desc->setTessellationOutputWindingOrder(.Clockwise)
+    render_pipeline_desc->setTessellationOutputWindingOrder(.Clockwise)
 
     // Depth attachment
     if desc.depth_format != .RGBA8_UNorm {  // Has depth
@@ -417,7 +417,7 @@ metal_create_pipeline :: proc(desc: PipelineDesc) -> Pipeline {
     pipeline_state, err := state.device->newRenderPipelineState(render_pipeline_desc)
     assert(pipeline_state != nil, fmt.tprintf("Failed to create Metal pipeline: %v", err->localizedDescription()->odinString()))
 
-    log.info("✓ Pipeline created successfully")
+    log.info("-- Pipeline created successfully --")
     // Depth state (separate object in Metal)
     depth_state: ^MTL.DepthStencilState
     if desc.depth_state.test_enabled {
@@ -778,7 +778,6 @@ execute_set_uniform :: proc(cmd: SetUniformCommand) {
 
 @(private)
 execute_draw :: proc(cmd: DrawCommand) {
-
     state.encoder->drawPrimitives(
         .Triangle,
         NS.UInteger(cmd.first_vertex),

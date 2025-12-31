@@ -43,6 +43,7 @@ Event :: union {
 	MousePressedEvent,
 	MouseReleasedEvent,
 	MousePositionEvent,
+	MousePositionDeltaEvent,
 	MouseScrollEvent,
 
 	WindowResizeEvent,
@@ -70,6 +71,7 @@ KeyReleasedEvent :: struct { key: KeyboardKey }
 MousePressedEvent :: struct { button: MouseButton }
 MouseReleasedEvent :: struct { button: MouseButton }
 MousePositionEvent :: struct { x, y: f64 }
+MousePositionDeltaEvent :: struct { x, y: f64 }
 MouseScrollEvent :: struct { x, y: f64 }
 
 WindowResizeEvent :: struct { width, height: int}

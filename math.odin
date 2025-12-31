@@ -3,6 +3,14 @@ package main
 import "core:math"
 import "core:math/linalg"
 
+vector_length :: proc(v: Vector2) -> f32 {
+    return linalg.vector_length2(v)
+}
+
+vector_normalize :: proc(v: Vector2) -> Vector2 {
+    return linalg.vector_normalize(v)
+}
+
 matrix_translate :: proc(v: [3]f32) -> matrix[4,4]f32 {
 	return matrix[4,4]f32{
         1,   0,   0,   v.x,

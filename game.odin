@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:math"
@@ -12,28 +11,33 @@ TestLayer := Layer {
 
 import "core:math/rand"
 
-_events :: proc(input: ^WindowInput) {
+_events :: proc() {
 
     m: f32 = 3.33
-    if key_is_held(input, .LeftArrow) {
+    if key_is_held(.LeftArrow) {
         main_camera.position.x -= delta * m
     }
-    else if key_is_held(input, .RightArrow) {
+    else if key_is_held(.RightArrow) {
         main_camera.position.x += delta * m    
     }
 
-    if key_is_held(input, .UpArrow) {
+    if key_is_held(.UpArrow) {
         main_camera.position.y += delta * m
     }
-    else if key_is_held(input, .DownArrow) {
+    else if key_is_held(.DownArrow) {
         main_camera.position.y -= delta * m    
     }
     
+    if v := scroll_directional_vector(.Y); vector_length(v) > 0 {
+        main_camera.position.z -= v.y * 0.2
+    }
 
+    if mouse_button_is_held(.Middle) {
+        main_camera.rotation.y += mouse_directional(.X) * 0.4 * delta
+        main_camera.rotation.x += mouse_directional(.Y) * 0.4 * delta
+    }
 
-
-
-	if key_went_down(input, .E) {
+	if key_went_down(.E) {
 		//fmt.println("Pressed E LayerOne")
         
         for i in 0..<5 {
@@ -46,7 +50,7 @@ _events :: proc(input: ^WindowInput) {
         }        
 	}
 
-    if key_went_down(input, .W) {
+    if key_went_down(.W) {
         main_camera.projection = .Perspective
     }
 }
@@ -64,10 +68,6 @@ Vector3 :: [3]f32
 VECTOR_RIGHT   :: Vector3 {1, 0,  0}
 VECTOR_UP      :: Vector3 {0, 1,  0}
 VECTOR_FORWARD :: Vector3 {0, 0, -1}
-
-Position :: Vector3
-Rotation :: Vector3
-Scale    :: Vector3
 
 random_unit_vector_spherical :: proc() -> [3]f32 {
     // Random angles
@@ -90,9 +90,9 @@ Entity :: struct {
 }
 
 Transform :: struct {
-    position: Position,
-    rotation: Rotation,
-    scale:    Scale,
+    position: Vector3,
+    rotation: Vector3,
+    scale:    Vector3,
 }
 
 Mesh :: struct {
@@ -148,7 +148,7 @@ update_camera_vectors :: proc(camera: ^Camera) {
 
 
 _update :: proc(delta: f32) {
-    main_camera.rotation.y = -math.PI/2
+
     update_camera_vectors(&main_camera)
 
     cmd_update_renderpass_descriptors(&cmd_buffer, Update_Renderpass_Desc{
@@ -230,6 +230,8 @@ main :: proc() {
 
     context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
+
+    input = new(Input)
 
     init(1280, 720, "Hellope")
 

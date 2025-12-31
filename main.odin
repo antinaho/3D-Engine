@@ -22,7 +22,7 @@ Vertex :: struct #align(16) {
 @(private="file")
 application: ^Application
 
-WindowInput :: struct {
+Input :: struct {
 	keys_press_started: #sparse [KeyboardKey]bool,
 	keys_held: #sparse [KeyboardKey]bool,
 	keys_released: #sparse [KeyboardKey]bool,
@@ -31,9 +31,11 @@ WindowInput :: struct {
 	mouse_held: #sparse [MouseButton]bool,
 	mouse_released: #sparse [MouseButton]bool,
 
-	mouse_delta: [2]f64,
-	mouse_scroll: [2]f64,
+	mouse_position: [2]f64,
+	mouse_move_delta: [2]f64,
+	mouse_scroll_delta: [2]f64,
 }
+input: ^Input
 
 ApplicationWindow :: struct {
 	window: ^Window,
@@ -41,7 +43,6 @@ ApplicationWindow :: struct {
 	flags: WindowFlags,
 	renderer: ^Renderer,
 	
-	using _ : WindowInput,
 	layers: [dynamic]Layer,
 }
 cmd_buffer: CommandBuffer
@@ -97,9 +98,14 @@ close_requested :: proc() -> bool {
 }
 
 update_window :: proc(aw: ^ApplicationWindow) {
-	aw.keys_press_started = {}
-	aw.keys_released = {}
-
+	input.keys_press_started = {}
+	input.keys_released = {}
+	
+	input.mouse_press_started = {}
+	input.mouse_released = {}
+	
+	input.mouse_scroll_delta = {}
+	input.mouse_move_delta = {}
 	aw.window.process_events(aw.window)
 	
 	events := aw.window.get_events(aw.window)
@@ -110,11 +116,11 @@ update_window :: proc(aw: ^ApplicationWindow) {
 				aw.close_requested = true
 
 			case KeyPressedEvent:
-				aw.keys_press_started[e.key] = aw.keys_held[e.key] ~ true
-				aw.keys_held[e.key] = true
+				input.keys_press_started[e.key] = input.keys_held[e.key] ~ true
+				input.keys_held[e.key] = true
 			case KeyReleasedEvent:
-				aw.keys_released[e.key] = true
-				aw.keys_held[e.key] = false
+				input.keys_released[e.key] = true
+				input.keys_held[e.key] = false
 			case WindowResizeEvent:
 				aw.window.did_resize = true
 
@@ -135,23 +141,24 @@ update_window :: proc(aw: ^ApplicationWindow) {
 			case WindowDidResignKey:
 
 			case MousePressedEvent:
-				aw.mouse_press_started[e.button] = aw.mouse_held[e.button] ~ true
-				aw.mouse_held[e.button] = true
+				input.mouse_press_started[e.button] = input.mouse_held[e.button] ~ true
+				input.mouse_held[e.button] = true
 			case MouseReleasedEvent:
-				aw.mouse_released[e.button] = true
-				aw.mouse_held[e.button] = false
-
+				input.mouse_released[e.button] = true
+				input.mouse_held[e.button] = false
 			case MousePositionEvent:
-				aw.mouse_delta = {e.x, e.y}
+				input.mouse_position = {e.x, e.y}
+			case MousePositionDeltaEvent:
+				input.mouse_move_delta = {e.x, e.y}
 			case MouseScrollEvent:
-				aw.mouse_scroll = {e.x, e.y}
+				input.mouse_scroll_delta = {e.x, e.y}
 		}
 	}
 
 	#reverse for &layer in aw.layers {
 	
 		if layer.ingest_events != nil { 
-			layer.ingest_events(aw) 
+			layer.ingest_events() 
 		}
 	}
 
@@ -173,13 +180,13 @@ update_window :: proc(aw: ^ApplicationWindow) {
 
 Layer :: struct {
 	update: proc(delta: f32),
-	ingest_events: proc(input: ^WindowInput),
+	ingest_events: proc(),
 }
 
 render_pass_3d: DefaultRenderer
 
 run :: proc() {
-
+	
 	render_pass_3d = init_default_renderer(1280, 720)
 	//defer destroy_renderer_3d(&render_pass_3d)
 
@@ -215,35 +222,80 @@ runtime_app: f32
 delta: f32
 prev_time := time.tick_now()
 
-key_went_down :: proc(input: ^WindowInput, key: KeyboardKey) -> bool {
+key_went_down :: proc(key: KeyboardKey) -> bool {
 	return input.keys_press_started[key]
 }
 
-key_went_up :: proc(input: ^WindowInput, key: KeyboardKey) -> bool {
+key_went_up :: proc(key: KeyboardKey) -> bool {
 	return input.keys_released[key]
 }
 
-key_is_held :: proc(input: ^WindowInput, key: KeyboardKey) -> bool {
+key_is_held :: proc(key: KeyboardKey) -> bool {
 	return input.keys_held[key]
 }
 
 ScrollDirection :: enum {
 	X,
-	Y
+	Y,
+	Both,
 }
 
-scroll_raw :: proc(input: ^WindowInput, direction: ScrollDirection) -> f32 {
+scroll_directional :: proc(direction: ScrollDirection) -> f32 {
 	if direction == .X {
-		return f32(input.mouse_scroll.x)
+		return f32(input.mouse_scroll_delta.x)
+	} else if direction == .Y {
+		return f32(input.mouse_scroll_delta.y)
+	} else {
+		return f32(input.mouse_scroll_delta.x) + f32(input.mouse_scroll_delta.y)
 	}
-	return f32(input.mouse_scroll.y)
 }
 
-scroll_vector :: proc(input: ^WindowInput, direction: ScrollDirection) -> Vector2 {
+scroll_directional_vector :: proc(direction: ScrollDirection) -> Vector2 {
 	if direction == .X {
-		return {1, 0} * f32(input.mouse_scroll.x)
+		return {1, 0} * f32(input.mouse_scroll_delta.x)
+	} else if direction == .Y {
+		return {0, 1} * f32(input.mouse_scroll_delta.y)
+	} else {
+		return {f32(input.mouse_scroll_delta.x), f32(input.mouse_scroll_delta.y)}
+	}	
+}
+
+mouse_position :: proc() -> Vector2 {
+	return {f32(input.mouse_position.x), f32(input.mouse_position.y)}
+}
+
+mouse_directional :: proc(direction: ScrollDirection) -> f32 {
+	//log.debug(input.mouse_move_delta.x)
+	if direction == .X {
+		return f32(input.mouse_move_delta.x)
+	} else if direction == .Y {
+		return f32(input.mouse_move_delta.y)
+	} else {
+		return f32(input.mouse_move_delta.x) + f32(input.mouse_move_delta.y)
 	}
-	return {0, 1} * f32(input.mouse_scroll.y)
+	
+}
+
+mouse_directional_vector :: proc(direction: ScrollDirection) -> Vector2 {
+	if direction == .X {
+		return {1, 0} * f32(input.mouse_move_delta.x)
+	} else if direction == .Y {
+		return {0, 1} * f32(input.mouse_move_delta.y)
+	} else {
+		return {f32(input.mouse_move_delta.x), f32(input.mouse_move_delta.y)}
+	}
+}
+
+mouse_button_went_down :: proc(button: MouseButton) -> bool {
+	return input.mouse_press_started[button]
+}
+
+mouse_button_went_up :: proc(button: MouseButton) -> bool {
+	return input.mouse_released[button]
+}
+
+mouse_button_is_held :: proc(button: MouseButton) -> bool {
+	return input.mouse_held[button]
 }
 
 reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> (err: bool) {
@@ -259,12 +311,40 @@ reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> (err: bool) {
 	return
 }
 
-MouseButton :: enum u8 {
+MouseButton :: enum {
 	Left 	= 0,
 	Right 	= 1,
 	Middle 	= 2,
 
-	Limit 	= 255,
+	MouseOther_1  = 3,
+	MouseOther_2  = 4,
+	MouseOther_3  = 5,
+	MouseOther_4  = 6,
+	MouseOther_5  = 7,
+	MouseOther_6  = 8,
+	MouseOther_7  = 9,
+	MouseOther_8  = 10,
+	MouseOther_9  = 11,
+	MouseOther_10 = 12,
+	MouseOther_11 = 13,
+	MouseOther_12 = 14,
+	MouseOther_13 = 15,
+	MouseOther_14 = 16,
+	MouseOther_15 = 17,
+	MouseOther_16 = 18,
+	MouseOther_17 = 19,
+	MouseOther_18 = 20,
+	MouseOther_19 = 21,
+	MouseOther_20 = 22,
+	MouseOther_21 = 23,
+	MouseOther_22 = 24,
+	MouseOther_23 = 25,
+	MouseOther_24 = 26,
+	MouseOther_25 = 27,
+	MouseOther_26 = 28,
+	MouseOther_27 = 29,
+	MouseOther_28 = 30,
+	MouseOther_29 = 31
 }
 
 KeyboardKey :: enum {
@@ -379,7 +459,6 @@ KeyboardKey :: enum {
 	VolumeDown			= 0x6C,
 	Mute				= 0x6D,
 
-	ForwardDelete		= 0x75,
 	// Windows unique
 	Insert				= 0x6E,
 	Scroll_Lock			= 0x70,
@@ -388,6 +467,7 @@ KeyboardKey :: enum {
 	Pause				= 0x73,
 	// Mac unique
 	NPadClear			= 0x74,
+	ForwardDelete		= 0x75,
 	Function			= 0x76,
 	Help				= 0x77,
 	JIS_Yen				= 0x78,
