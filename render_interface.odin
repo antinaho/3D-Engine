@@ -87,7 +87,7 @@ create_default_pipeline :: proc() -> Pipeline {
         },
 
         depth_format = .Depth32_Float,
-        sample_count = DEFAULT_MSAA_SAMPLE_COUNT,  // MSAA
+        sample_count = DEFAULT_MSAA_SAMPLE_COUNT, 
     })
 }
 

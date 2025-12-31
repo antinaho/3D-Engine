@@ -11,7 +11,7 @@ TestLayer := Layer {
 }
 
 import "core:math/rand"
-n: f32
+
 _events :: proc(input: ^WindowInput) {
 
     m: f32 = 3.33
@@ -30,20 +30,25 @@ _events :: proc(input: ^WindowInput) {
     }
     
 
+
+
+
 	if key_went_down(input, .E) {
 		//fmt.println("Pressed E LayerOne")
         
         for i in 0..<5 {
             append(&instance_data, InstanceData {
                 matrix_model(
-                quad.position + {rand.float32() * f32(n), rand.float32() * f32(n), 0},
+                quad.position + random_unit_vector_spherical(),
                 quad.rotation * RAD_TO_DEG,
                 quad.scale
-            )})
-            n += 0.125
-            
+            )})            
         }        
 	}
+
+    if key_went_down(input, .W) {
+        main_camera.projection = .Perspective
+    }
 }
 
 vertex_buf: Buffer
@@ -51,6 +56,7 @@ index_buf: Buffer
 instance_buf: Buffer
 
 RAD_TO_DEG :: math.RAD_PER_DEG
+DEG_TO_RAD :: math.DEG_PER_RAD
 
 Vector2 :: [2]f32
 Vector3 :: [3]f32
@@ -63,9 +69,24 @@ Position :: Vector3
 Rotation :: Vector3
 Scale    :: Vector3
 
+random_unit_vector_spherical :: proc() -> [3]f32 {
+    // Random angles
+    theta := rand.float32_range(0, math.TAU)          // Azimuth [0, 2π]
+    phi := math.acos(rand.float32_range(-1, 1))       // Polar angle via cosine distribution
+    
+    sin_phi := math.sin(phi)
+    
+    return [3]f32{
+        sin_phi * math.cos(theta),  // X
+        sin_phi * math.sin(theta),  // Y
+        math.cos(phi),               // Z
+    }
+}
+
 Entity :: struct {
     using transform: Transform,
     mesh: ^Mesh,
+    vel: Vector3,
 }
 
 Transform :: struct {
@@ -103,7 +124,33 @@ quad := Entity {
 
 instance_data: [dynamic]InstanceData
 
+get_camera_target :: proc(camera: Camera) -> [3]f32 {
+
+    rad_rotation := camera.rotation * DEG_TO_RAD
+    forward := [3]f32{
+        math.cos(rad_rotation.y) * math.cos(rad_rotation.x),
+        math.sin(rad_rotation.x),                                 
+        math.sin(rad_rotation.y) * math.cos(rad_rotation.x),
+    }
+    
+    return camera.position + forward
+}
+import "core:math/linalg"
+update_camera_vectors :: proc(camera: ^Camera) {
+    camera.forward = linalg.normalize([3]f32{
+        math.cos(camera.rotation.y) * math.cos(camera.rotation.x),
+        math.sin(camera.rotation.x),
+        math.sin(camera.rotation.y) * math.cos(camera.rotation.x),
+    })
+    camera.right = linalg.normalize(linalg.cross(camera.forward, VECTOR_UP))
+    camera.up = linalg.normalize(linalg.cross(camera.right, camera.forward))
+}
+
+
 _update :: proc(delta: f32) {
+    main_camera.rotation.y = -math.PI/2
+    update_camera_vectors(&main_camera)
+
     cmd_update_renderpass_descriptors(&cmd_buffer, Update_Renderpass_Desc{
         renderpass_descriptor=render_pass_3d.renderpass_descriptor,
         msaa_texture = render_pass_3d.msaa_render_target_texture,
@@ -113,13 +160,27 @@ _update :: proc(delta: f32) {
     cmd_begin_pass(&cmd_buffer, "Test", render_pass_3d.renderpass_descriptor)
     cmd_set_pipeline(&cmd_buffer, render_pass_3d.pipeline)
 
-    view := matrix_look_at(
+    view: matrix[4,4]f32
+    if main_camera.projection == .Orthographic {
+        view = matrix_look_at(
             main_camera.position,
             main_camera.position + VECTOR_FORWARD,
             VECTOR_UP
         )
-
-    proj := get_orthographic_projection(main_camera)
+    } else {
+        view = matrix_look_at(
+            main_camera.position,
+            main_camera.position + main_camera.forward,
+            main_camera.up
+        )
+    }
+    
+    proj: matrix[4, 4]f32
+    if main_camera.projection == .Orthographic {
+        proj = get_orthographic_projection(main_camera)
+    } else {
+        proj = get_perspective_projection(main_camera)
+    }
     
     uniforms := UniformData {
         view = view,

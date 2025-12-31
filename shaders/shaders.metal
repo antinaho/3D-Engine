@@ -193,12 +193,6 @@ using namespace metal;
 
 
 
-
-
-
-
-
-
 struct VertexIn {
     float3 position;
  
