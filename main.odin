@@ -227,6 +227,25 @@ key_is_held :: proc(input: ^WindowInput, key: KeyboardKey) -> bool {
 	return input.keys_held[key]
 }
 
+ScrollDirection :: enum {
+	X,
+	Y
+}
+
+scroll_raw :: proc(input: ^WindowInput, direction: ScrollDirection) -> f32 {
+	if direction == .X {
+		return f32(input.mouse_scroll.x)
+	}
+	return f32(input.mouse_scroll.y)
+}
+
+scroll_vector :: proc(input: ^WindowInput, direction: ScrollDirection) -> Vector2 {
+	if direction == .X {
+		return {1, 0} * f32(input.mouse_scroll.x)
+	}
+	return {0, 1} * f32(input.mouse_scroll.y)
+}
+
 reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> (err: bool) {
 	fmt.println("Tracking allocator: ")
 
@@ -359,16 +378,16 @@ KeyboardKey :: enum {
 	VolumeUp			= 0x6B,
 	VolumeDown			= 0x6C,
 	Mute				= 0x6D,
+
+	ForwardDelete		= 0x75,
 	// Windows unique
 	Insert				= 0x6E,
-	Delete				= 0x6F,
 	Scroll_Lock			= 0x70,
 	Num_Lock			= 0x71,
 	Print_Screen		= 0x72,
 	Pause				= 0x73,
 	// Mac unique
 	NPadClear			= 0x74,
-	ForwardDelete		= 0x75,
 	Function			= 0x76,
 	Help				= 0x77,
 	JIS_Yen				= 0x78,
