@@ -1,7 +1,18 @@
 package main
 
 import "core:math"
+import "core:math/rand"
 import "core:math/linalg"
+
+RAD_TO_DEG :: math.RAD_PER_DEG
+DEG_TO_RAD :: math.DEG_PER_RAD
+
+Vector2 :: [2]f32
+Vector3 :: [3]f32
+
+VECTOR_RIGHT   :: Vector3 {1, 0,  0}
+VECTOR_UP      :: Vector3 {0, 1,  0}
+VECTOR_FORWARD :: Vector3 {0, 0, -1}
 
 vector_length :: proc(v: Vector2) -> f32 {
     return linalg.vector_length2(v)
@@ -127,4 +138,18 @@ get_orthographic_projection :: proc(camera: Camera) -> matrix[4,4]f32 {
         camera.near,
         camera.far,
     )
+}
+
+random_unit_vector_spherical :: proc() -> [3]f32 {
+    // Random angles
+    theta := rand.float32_range(0, math.TAU)          // Azimuth [0, 2π]
+    phi := math.acos(rand.float32_range(-1, 1))       // Polar angle via cosine distribution
+    
+    sin_phi := math.sin(phi)
+    
+    return [3]f32{
+        sin_phi * math.cos(theta),  // X
+        sin_phi * math.sin(theta),  // Y
+        math.cos(phi),               // Z
+    }
 }

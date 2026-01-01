@@ -17,7 +17,7 @@ Renderer :: struct {
 }
 
 RendererAPI :: struct {
-    draw: proc(window: ^Window, renderer: ^Renderer),
+    draw: proc(window: ^Window, renderer: ^Renderer, command_buffer: ^CommandBuffer),
     cleanup: proc(window: ^Window, renderer: ^Renderer),
 }
 

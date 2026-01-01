@@ -8,68 +8,50 @@ import "base:runtime"
 import "core:log"
 
 MacWindowAPI :: WindowAPI {
-	process_events = _mac_process_events,
-	clear_events = _mac_clear_events,
-	get_events = _mac_get_events,
 	close = _mac_close_window,
 	get_window_handle = _mac_get_window_handle,
 }
 
 MacPlatform :: struct {
 	window: ^NS.Window,
-	mouse_position: NS.Point,
 }
 
 ns_app: ^NS.Application
 
-_mac_clear_events :: proc(w: ^Window) {
-	clear(&w.events)
-}
-
-_mac_get_events :: proc(w: ^Window) -> []Event {
-	return w.events[:]
-}
-
-_mac_process_events :: proc(w: ^Window) {
+_mac_process_events :: proc() {
 	event: ^NS.Event
-	platform := cast(^MacPlatform)w.platform
 	for {
 		event = ns_app->nextEventMatchingMask(NS.EventMaskAny, NS.Date_distantPast(), NS.DefaultRunLoopMode, true)
 		if event == nil { break }
 		
 		#partial switch event->type() {
 			case .KeyDown:
-				append(&w.events, KeyPressedEvent{key=code_to_keyboard_key[event->keyCode()]})
+				append(&g_input.events, KeyPressedEvent{key=code_to_keyboard_key[event->keyCode()]})
 			case .KeyUp:
-				append(&w.events, KeyReleasedEvent{key=code_to_keyboard_key[event->keyCode()]})
+				append(&g_input.events, KeyReleasedEvent{key=code_to_keyboard_key[event->keyCode()]})
 			
 
 			case .LeftMouseDown:
-				append(&w.events, MousePressedEvent{button=code_to_mouse_button[MouseButton.Left]})
+				append(&g_input.events, MousePressedEvent{button=code_to_mouse_button[MouseButton.Left]})
 			case .LeftMouseUp, .RightMouseUp, .OtherMouseUp:
 				btn_n := event->buttonNumber()
-				append(&w.events, MouseReleasedEvent{button=code_to_mouse_button[int(btn_n)]})
+				append(&g_input.events, MouseReleasedEvent{button=code_to_mouse_button[int(btn_n)]})
 			case .RightMouseDown:
-				append(&w.events, MousePressedEvent{button=code_to_mouse_button[MouseButton.Right]})
+				append(&g_input.events, MousePressedEvent{button=code_to_mouse_button[MouseButton.Right]})
 
 
 			case .OtherMouseDown:
 				btn_n := event->buttonNumber()
-				append(&w.events, MousePressedEvent{button=code_to_mouse_button[int(btn_n)]})
+				append(&g_input.events, MousePressedEvent{button=code_to_mouse_button[int(btn_n)]})
 
 			
 			case .MouseMoved, .LeftMouseDragged, .RightMouseDragged, .OtherMouseDragged:
 				//TODO currently sending pixels idk should it be something else, gotta check with other resolution/screen sizes
-				position := event->locationInWindow()
-				delta_pixels := [2]NS.Float {position.x - platform.mouse_position.x, position.y - platform.mouse_position.y}
-				platform.mouse_position = position
-				
-				append(&w.events, MousePositionEvent{x=f64(position.x), y=f64(position.y)})
-				append(&w.events, MousePositionDeltaEvent{x=f64(delta_pixels.x), y=f64(delta_pixels.y)})
-
+				position := event->locationInWindow()				
+				append(&g_input.events, MousePositionEvent{x=f64(position.x), y=f64(position.y)})
 			case .ScrollWheel:
 				scroll_x, scroll_y := event->scrollingDelta()
-				append(&w.events, MouseScrollEvent{x=f64(scroll_x), y=f64(scroll_y)})
+				append(&g_input.events, MouseScrollEvent{x=f64(scroll_x), y=f64(scroll_y)})
 		}
 		ns_app->sendEvent(event)
 	}
@@ -83,14 +65,13 @@ _mac_get_window_handle :: proc(w: ^Window) -> WindowHandle {
 _mac_close_window :: proc(w: ^Window) {
 	platform := cast(^MacPlatform)w.platform
 	
-	delete(w.events)
 	platform.window->close()
 
 	free(platform)
 	free(w)
 }
 
-window_create_mac :: proc(width, height: int, title: string, allocator: runtime.Allocator, flags: WindowFlags) -> ^Window {
+window_create_mac :: proc(width, height: int, title: string, flags: WindowFlags) -> ^Window {
 	window := new(Window)
 	platform := new(MacPlatform)
 
@@ -100,7 +81,6 @@ window_create_mac :: proc(width, height: int, title: string, allocator: runtime.
 	window.title = title
 	window.width = width
 	window.height = height
-	window.events = make([dynamic]Event, allocator)
 	
 	platform.window = NS.Window_alloc()
 
@@ -229,8 +209,6 @@ window_create_mac :: proc(width, height: int, title: string, allocator: runtime.
 	wd := cast(^GameWindowDelegate)del
 	
 	platform.window->setDelegate(wd)
-
-	platform.mouse_position = NS.Point {NS.Float(width / 2), NS.Float(height / 2)}
 
 	window.api = MacWindowAPI
 	window.platform = cast(Platform)platform
@@ -430,7 +408,7 @@ GameWindowDelegate :: struct {
 
 //User requested close
 window_should_close :: proc (window: ^Window, notification: ^NS.Notification) {
-    append(&window.events, WindowEventCloseRequested{})
+    append(&g_input.events, WindowEventCloseRequested{ window })
 }
 
 window_will_close :: proc (notification: ^NS.Notification) {
@@ -446,29 +424,29 @@ window_did_resize :: proc (window: ^Window, notification: ^NS.Notification) {
 	window.width = int(frame.width)
 	window.height = int(frame.height)
 
-	append(&window.events, WindowResizeEvent{int(frame.width), int(frame.height)})
+	append(&g_input.events, WindowResizeEvent{ window, int(frame.width), int(frame.height) })
 }
 
 ///////////////////////
 // Minimizing window
 
 window_did_miniaturize :: proc (window: ^Window, notification: ^NS.Notification) {
-	append(&window.events, WindowMinimizeStartEvent{})
+	append(&g_input.events, WindowMinimizeStartEvent{ window })
 }
 
 window_did_deminiaturize :: proc (window: ^Window, notification: ^NS.Notification) {
-	append(&window.events, WindowMinimizeEndEvent{})
+	append(&g_input.events, WindowMinimizeEndEvent{ window })
 }
 
 ///////////////////////
 // Fullscreen window
 
 window_did_enter_fullscreen :: proc (window: ^Window, notification: ^NS.Notification) {
-	append(&window.events, WindowEnterFullscreenEvent{})
+	append(&g_input.events, WindowEnterFullscreenEvent{ window })
 }
 
 window_did_exit_fullscreen :: proc (window: ^Window, notification: ^NS.Notification) {
-	append(&window.events, WindowExitFullscreenEvent{})
+	append(&g_input.events, WindowExitFullscreenEvent{ window })
 }
 
 ///////////////////////
@@ -480,18 +458,18 @@ window_did_move :: proc (window: ^Window, notification: ^NS.Notification) {
 	x := frame.x
 	y := frame.y
 
-	append(&window.events, WindowMoveEvent{int(x), int(y)})
+	append(&g_input.events, WindowMoveEvent{ window, int(x), int(y) })
 }
 
 ///////////////////////
 // Focusing window
 
 window_did_become_key :: proc (window: ^Window, notification: ^NS.Notification) {
-	append(&window.events, WindowDidBecomeKey{})
+	append(&g_input.events, WindowDidBecomeKey{ window })
 }
 
 window_did_resign_key :: proc (window: ^Window, notification: ^NS.Notification) {
-	append(&window.events, WindowDidResignKey{})
+	append(&g_input.events, WindowDidResignKey{ window })
 }
 
 //////////////////////
@@ -503,8 +481,8 @@ window_did_change_occlusion_state :: proc (window: ^Window, notification: ^NS.No
 	visible := platform.window->occlusionStateVisible()
 
 	if visible {
-		append(&window.events, WindowBecameVisibleEvent{})
+		append(&g_input.events, WindowBecameVisibleEvent{ window })
 	} else if !visible {
-		append(&window.events, WindowBecameHiddenEvent{})
+		append(&g_input.events, WindowBecameHiddenEvent{ window })
 	}
 }

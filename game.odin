@@ -4,28 +4,117 @@ import "core:log"
 import "core:mem"
 import "core:math"
 
-TestLayer := Layer {
-	ingest_events = _events,
-	update = _update,
+TestLayerData :: struct {
+    default_renderer: DefaultRenderer,
+    vertex_buf: Buffer,
+    index_buf: Buffer,
+    instance_buf: Buffer,
+    instance_data: [dynamic]InstanceData,
 }
 
-import "core:math/rand"
+create_test_layer :: proc() -> Layer {
+    data := new(TestLayerData)
+    return Layer {
+        on_attach = _attach,
+        on_event = _events,
+        update = _update,
+        render = _render,
+        data = cast(uintptr)data,
+    }
+}
 
-_events :: proc() {
+_attach :: proc(layer: ^Layer) {
+
+    d := cast(^TestLayerData)layer.data
+    d^ = {
+        default_renderer = init_default_renderer(1280, 720),
+        vertex_buf = init_buffer_with_size(size_of(Vertex) * 1000, .Vertex, .Dynamic),
+        instance_buf = init_buffer_with_size(size_of(InstanceData) * 1000, .Vertex, .Dynamic),
+        index_buf = init_buffer_with_size(size_of(u32) * 1000, .Index, .Dynamic),
+        instance_data = make([dynamic]InstanceData),
+    }
+}
+
+
+_update :: proc(layer: ^Layer, delta: f32) {
+    update_camera_vectors(&main_camera)    
+}
+
+_render :: proc(layer: ^Layer, command_buffer: ^CommandBuffer) {
+    data := cast(^TestLayerData)layer.data
+    cmd_update_renderpass_descriptors(command_buffer, Update_Renderpass_Desc{
+        renderpass_descriptor=data.default_renderer.renderpass_descriptor,
+        msaa_texture = data.default_renderer.msaa_render_target_texture,
+        depth_texture = data.default_renderer.depth_texture,
+    })
+
+    cmd_begin_pass(command_buffer, "Test", data.default_renderer.renderpass_descriptor)
+    cmd_set_pipeline(command_buffer, data.default_renderer.pipeline)
+
+    view: matrix[4,4]f32
+    if main_camera.projection == .Orthographic {
+        view = matrix_look_at(
+            main_camera.position,
+            main_camera.position + VECTOR_FORWARD,
+            VECTOR_UP
+        )
+    } else {
+        view = matrix_look_at(
+            main_camera.position,
+            main_camera.position + main_camera.forward,
+            main_camera.up
+        )
+    }
+    
+    proj: matrix[4, 4]f32
+    if main_camera.projection == .Orthographic {
+        proj = get_orthographic_projection(main_camera)
+    } else {
+        proj = get_perspective_projection(main_camera)
+    }
+    
+    uniforms := UniformData {
+        view = view,
+        projection = proj,
+    }
+    cmd_set_uniform(command_buffer, uniforms, 1, .Vertex)
+
+    if len(data.instance_data) == 0 {
+        cmd_end_pass(command_buffer)
+        return
+    }
+
+    fill_buffer(&data.vertex_buf, raw_data(QuadMesh.verteces), size_of(Vertex) * len(QuadMesh.verteces), 0)
+    fill_buffer(&data.index_buf,  raw_data(QuadMesh.indices),  size_of(u32) * len(QuadMesh.indices), 0)
+    fill_buffer(&data.instance_buf, raw_data(data.instance_data), size_of(InstanceData) * len(data.instance_data), 0)
+
+    cmd_bind_vertex_buffer(command_buffer, data.vertex_buf, 0, 0)
+    cmd_bind_vertex_buffer(command_buffer, data.instance_buf, 0, 2)
+    cmd_bind_index_buffer(command_buffer, data.index_buf, 0)
+    cmd_bind_texture(command_buffer, data.default_renderer.custom_texture, 0, .Fragment)
+    cmd_bind_sampler(command_buffer, data.default_renderer.default_sampler, 0, .Fragment)
+
+    cmd_draw_indexed_with_instances(command_buffer, len(QuadMesh.indices), data.index_buf, len(data.instance_data))
+
+    cmd_end_pass(command_buffer)
+}
+
+_events :: proc(layer: ^Layer) {
+    data := cast(^TestLayerData)layer.data
 
     m: f32 = 3.33
     if key_is_held(.LeftArrow) {
-        main_camera.position.x -= delta * m
+        main_camera.position.x -= delta_time() * m
     }
     else if key_is_held(.RightArrow) {
-        main_camera.position.x += delta * m    
+        main_camera.position.x += delta_time() * m    
     }
 
     if key_is_held(.UpArrow) {
-        main_camera.position.y += delta * m
+        main_camera.position.y += delta_time() * m
     }
     else if key_is_held(.DownArrow) {
-        main_camera.position.y -= delta * m    
+        main_camera.position.y -= delta_time() * m    
     }
     
     if v := scroll_directional_vector(.Y); vector_length(v) > 0 {
@@ -33,15 +122,15 @@ _events :: proc() {
     }
 
     if mouse_button_is_held(.Middle) {
-        main_camera.rotation.y += mouse_directional(.X) * 0.4 * delta
-        main_camera.rotation.x += mouse_directional(.Y) * 0.4 * delta
+        main_camera.rotation.y += mouse_directional(.X) * 0.4 * delta_time()
+        main_camera.rotation.x += mouse_directional(.Y) * 0.4 * delta_time()
     }
 
 	if key_went_down(.E) {
 		//fmt.println("Pressed E LayerOne")
         
         for i in 0..<5 {
-            append(&instance_data, InstanceData {
+            append(&data.instance_data, InstanceData {
                 matrix_model(
                 quad.position + random_unit_vector_spherical(),
                 quad.rotation * RAD_TO_DEG,
@@ -55,33 +144,6 @@ _events :: proc() {
     }
 }
 
-vertex_buf: Buffer
-index_buf: Buffer
-instance_buf: Buffer
-
-RAD_TO_DEG :: math.RAD_PER_DEG
-DEG_TO_RAD :: math.DEG_PER_RAD
-
-Vector2 :: [2]f32
-Vector3 :: [3]f32
-
-VECTOR_RIGHT   :: Vector3 {1, 0,  0}
-VECTOR_UP      :: Vector3 {0, 1,  0}
-VECTOR_FORWARD :: Vector3 {0, 0, -1}
-
-random_unit_vector_spherical :: proc() -> [3]f32 {
-    // Random angles
-    theta := rand.float32_range(0, math.TAU)          // Azimuth [0, 2π]
-    phi := math.acos(rand.float32_range(-1, 1))       // Polar angle via cosine distribution
-    
-    sin_phi := math.sin(phi)
-    
-    return [3]f32{
-        sin_phi * math.cos(theta),  // X
-        sin_phi * math.sin(theta),  // Y
-        math.cos(phi),               // Z
-    }
-}
 
 Entity :: struct {
     using transform: Transform,
@@ -122,92 +184,6 @@ quad := Entity {
     mesh = &quad_mesh,
 }
 
-instance_data: [dynamic]InstanceData
-
-get_camera_target :: proc(camera: Camera) -> [3]f32 {
-
-    rad_rotation := camera.rotation * DEG_TO_RAD
-    forward := [3]f32{
-        math.cos(rad_rotation.y) * math.cos(rad_rotation.x),
-        math.sin(rad_rotation.x),                                 
-        math.sin(rad_rotation.y) * math.cos(rad_rotation.x),
-    }
-    
-    return camera.position + forward
-}
-import "core:math/linalg"
-update_camera_vectors :: proc(camera: ^Camera) {
-    camera.forward = linalg.normalize([3]f32{
-        math.cos(camera.rotation.y) * math.cos(camera.rotation.x),
-        math.sin(camera.rotation.x),
-        math.sin(camera.rotation.y) * math.cos(camera.rotation.x),
-    })
-    camera.right = linalg.normalize(linalg.cross(camera.forward, VECTOR_UP))
-    camera.up = linalg.normalize(linalg.cross(camera.right, camera.forward))
-}
-
-
-_update :: proc(delta: f32) {
-
-    update_camera_vectors(&main_camera)
-
-    cmd_update_renderpass_descriptors(&cmd_buffer, Update_Renderpass_Desc{
-        renderpass_descriptor=render_pass_3d.renderpass_descriptor,
-        msaa_texture = render_pass_3d.msaa_render_target_texture,
-        depth_texture = render_pass_3d.depth_texture,
-    })
-
-    cmd_begin_pass(&cmd_buffer, "Test", render_pass_3d.renderpass_descriptor)
-    cmd_set_pipeline(&cmd_buffer, render_pass_3d.pipeline)
-
-    view: matrix[4,4]f32
-    if main_camera.projection == .Orthographic {
-        view = matrix_look_at(
-            main_camera.position,
-            main_camera.position + VECTOR_FORWARD,
-            VECTOR_UP
-        )
-    } else {
-        view = matrix_look_at(
-            main_camera.position,
-            main_camera.position + main_camera.forward,
-            main_camera.up
-        )
-    }
-    
-    proj: matrix[4, 4]f32
-    if main_camera.projection == .Orthographic {
-        proj = get_orthographic_projection(main_camera)
-    } else {
-        proj = get_perspective_projection(main_camera)
-    }
-    
-    uniforms := UniformData {
-        view = view,
-        projection = proj,
-    }
-    cmd_set_uniform(&cmd_buffer, uniforms, 1, .Vertex)
-
-    if len(instance_data) == 0 {
-        cmd_end_pass(&cmd_buffer)
-        return
-    }
-
-    fill_buffer(&vertex_buf, raw_data(QuadMesh.verteces), size_of(Vertex) * len(QuadMesh.verteces), 0)
-    fill_buffer(&index_buf,  raw_data(QuadMesh.indices),  size_of(u32) * len(QuadMesh.indices), 0)
-    fill_buffer(&instance_buf, raw_data(instance_data), size_of(InstanceData) * len(instance_data), 0)
-
-    cmd_bind_vertex_buffer(&cmd_buffer, vertex_buf, 0, 0)
-    cmd_bind_vertex_buffer(&cmd_buffer, instance_buf, 0, 2)
-    cmd_bind_index_buffer(&cmd_buffer, index_buf, 0)
-    cmd_bind_texture(&cmd_buffer, render_pass_3d.custom_texture, 0, .Fragment)
-    cmd_bind_sampler(&cmd_buffer, render_pass_3d.default_sampler, 0, .Fragment)
-
-    cmd_draw_indexed_with_instances(&cmd_buffer, len(QuadMesh.indices), index_buf, len(instance_data))
-
-    cmd_end_pass(&cmd_buffer)
-}
-
 InstanceData :: struct #align(16) {
     model:      matrix[4, 4]f32,
 }
@@ -217,9 +193,9 @@ UniformData :: struct #align(16) {
     projection:  matrix[4, 4]f32,
 }
 
-
 main :: proc() {
     
+    // Tracking allocator
     when ODIN_DEBUG {
         default_allocator := context.allocator
         tracking_allocator: mem.Tracking_Allocator
@@ -231,13 +207,20 @@ main :: proc() {
     context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
 
-    input = new(Input)
+    launch_config := WindowConfig {
+        width = 1280,
+        height = 720,
+        title = "Hellope",
+    }
 
-    init(1280, 720, "Hellope")
+    application_init(launch_config)
 
-    app_window := create_window(1280, 720, "Hellope", context.allocator, {.MainWindow})
-
-    add_layer(app_window, TestLayer)
+    layer := create_test_layer()
+    add_layer(&layer)
+    
+    application_new_window(launch_config, SecondaryWindow)
+    layer_n := create_test_layer()
+    add_layer(&layer_n, 1)
 
     run()
 }
