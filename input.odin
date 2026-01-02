@@ -1,27 +1,55 @@
 package main
 
+import "base:runtime"
+import "core:mem"
 import "core:log"
+
+MAX_INPUT_EVENTS_CAPACITY :: 64
 
 g_input: ^Input
 
-Input :: struct {
-	keys_press_started: #sparse [KeyboardKey]bool,
-	keys_held: #sparse [KeyboardKey]bool,
-	keys_released: #sparse [KeyboardKey]bool,
+_input_arena: mem.Arena
 
-	mouse_press_started: #sparse [MouseButton]bool,
-	mouse_held: #sparse [MouseButton]bool,
-	mouse_released: #sparse [MouseButton]bool,
+Input :: struct {
+	keys_press_started: #sparse [InputKeyboardKey]bool,
+	keys_held: #sparse [InputKeyboardKey]bool,
+	keys_released: #sparse [InputKeyboardKey]bool,
+
+	mouse_press_started: #sparse [InputMouseButton]bool,
+	mouse_held: #sparse [InputMouseButton]bool,
+	mouse_released: #sparse [InputMouseButton]bool,
 
 	mouse_position: [2]f64,
 	mouse_move_delta: [2]f64,
 	mouse_scroll_delta: [2]f64,
 
-	events: [dynamic]Event,
+	events: [MAX_INPUT_EVENTS_CAPACITY]Event,
+	event_count: int,
 }
 
-input_get_events :: proc() -> []Event {
-	return g_input.events[:]
+input_init :: proc() {
+	assert(g_input == nil, "Only 1 input object allowed")
+
+	backing := make([]byte, (
+		size_of(Input)
+	))
+	mem.arena_init(&_input_arena, backing)
+	input_allocator := mem.arena_allocator(&_input_arena)
+
+	g_input = new(Input, input_allocator)
+}
+
+input_destroy :: proc() {
+	delete(_input_arena.data)
+	mem.arena_free_all(&_input_arena)
+}
+
+input_clear_events :: #force_inline proc() {
+	g_input.event_count = 0
+}
+
+input_get_events :: #force_inline proc()  -> []Event {
+	return g_input.events[:g_input.event_count]
 }
 
 process_events :: proc() {
@@ -41,11 +69,21 @@ reset_input_state :: proc() {
 	g_input.mouse_move_delta = {}
 }
 
+input_new_event :: proc(event: Event) {
+	if g_input.event_count == MAX_INPUT_EVENTS_CAPACITY - 1 {
+		log.warn("Capped input events")
+		return
+	}
+
+	g_input.events[g_input.event_count] = event
+	g_input.event_count += 1
+}
+
 update_input_state :: proc() {
 	events := input_get_events()
 
-	for &event in events {
-		switch &e in event {
+	for event in events {
+		switch e in event {
 			case WindowEventCloseRequested:
 				e.window.close_requested = true
 
@@ -104,25 +142,25 @@ update_input_state :: proc() {
 	}
 }
 
-key_went_down :: proc(key: KeyboardKey) -> bool {
+input_key_went_down :: proc(key: InputKeyboardKey) -> bool {
 	return g_input.keys_press_started[key]
 }
 
-key_went_up :: proc(key: KeyboardKey) -> bool {
+input_key_went_up :: proc(key: InputKeyboardKey) -> bool {
 	return g_input.keys_released[key]
 }
 
-key_is_held :: proc(key: KeyboardKey) -> bool {
+input_key_is_held :: proc(key: InputKeyboardKey) -> bool {
 	return g_input.keys_held[key]
 }
 
-ScrollDirection :: enum {
+InputScrollDirection :: enum {
 	X,
 	Y,
 	Both,
 }
 
-scroll_directional :: proc(direction: ScrollDirection) -> f32 {
+input_scroll_directional :: proc(direction: InputScrollDirection) -> f32 {
 	if direction == .X {
 		return f32(g_input.mouse_scroll_delta.x)
 	} else if direction == .Y {
@@ -132,7 +170,7 @@ scroll_directional :: proc(direction: ScrollDirection) -> f32 {
 	}
 }
 
-scroll_directional_vector :: proc(direction: ScrollDirection) -> Vector2 {
+input_scroll_directional_vector :: proc(direction: InputScrollDirection) -> Vector2 {
 	if direction == .X {
 		return {1, 0} * f32(g_input.mouse_scroll_delta.x)
 	} else if direction == .Y {
@@ -142,11 +180,11 @@ scroll_directional_vector :: proc(direction: ScrollDirection) -> Vector2 {
 	}	
 }
 
-mouse_position :: proc() -> Vector2 {
+input_mouse_position :: proc() -> Vector2 {
 	return {f32(g_input.mouse_position.x), f32(g_input.mouse_position.y)}
 }
 
-mouse_directional :: proc(direction: ScrollDirection) -> f32 {
+input_mouse_delta :: proc(direction: InputScrollDirection) -> f32 {
 	if direction == .X {
 		return f32(g_input.mouse_move_delta.x)
 	} else if direction == .Y {
@@ -156,7 +194,7 @@ mouse_directional :: proc(direction: ScrollDirection) -> f32 {
 	}	
 }
 
-mouse_directional_vector :: proc(direction: ScrollDirection) -> Vector2 {
+input_mouse_delta_vector :: proc(direction: InputScrollDirection) -> Vector2 {
 	if direction == .X {
 		return {1, 0} * f32(g_input.mouse_move_delta.x)
 	} else if direction == .Y {
@@ -166,20 +204,20 @@ mouse_directional_vector :: proc(direction: ScrollDirection) -> Vector2 {
 	}
 }
 
-mouse_button_went_down :: proc(button: MouseButton) -> bool {
+input_mouse_button_went_down :: proc(button: InputMouseButton) -> bool {
 	return g_input.mouse_press_started[button]
 }
 
-mouse_button_went_up :: proc(button: MouseButton) -> bool {
+input_mouse_button_went_up :: proc(button: InputMouseButton) -> bool {
 	return g_input.mouse_released[button]
 }
 
-mouse_button_is_held :: proc(button: MouseButton) -> bool {
+input_mouse_button_is_held :: proc(button: InputMouseButton) -> bool {
 	return g_input.mouse_held[button]
 }
 
 
-MouseButton :: enum {
+InputMouseButton :: enum {
 	Left 	= 0,
 	Right 	= 1,
 	Middle 	= 2,
@@ -215,7 +253,7 @@ MouseButton :: enum {
 	MouseOther_29 = 31
 }
 
-KeyboardKey :: enum {
+InputKeyboardKey :: enum {
 	None				= 0x00,
 	N0					= 0x01,
 	N1					= 0x02,
