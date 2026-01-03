@@ -174,7 +174,7 @@ cmd_bind_sampler :: proc(cb: ^CommandBuffer, sampler: TextureSampler, slot: int,
 }
 
 cmd_set_uniform :: proc(cb: ^CommandBuffer, data: $T, slot: int, stage: ShaderStage) {
-    uniform_data := new(T)
+    uniform_data := new(T, context.temp_allocator)
     uniform_data^ = data
     
     append(cb, SetUniformCommand{

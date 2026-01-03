@@ -16,6 +16,7 @@ create_test_layer :: proc() -> Layer {
     data := new(TestLayerData)
     return Layer {
         on_attach = _attach,
+        on_detach = _detach,
         on_event = _events,
         update = _update,
         render = _render,
@@ -24,6 +25,9 @@ create_test_layer :: proc() -> Layer {
 }
 
 _attach :: proc(layer: ^Layer) {
+
+    log.debug(65 * DEG_TO_RAD)
+    log.debug(70 * DEG_TO_RAD)
 
     d := cast(^TestLayerData)layer.data
     d^ = {
@@ -35,9 +39,19 @@ _attach :: proc(layer: ^Layer) {
     }
 }
 
+_detach :: proc(layer: ^Layer) {
+    d := cast(^TestLayerData)layer.data
+
+    free(d.default_renderer.pipeline.handle)
+    release_buffer(&d.vertex_buf)
+    release_buffer(&d.instance_buf)
+    release_buffer(&d.index_buf)
+    delete(d.instance_data)
+    free(d)
+}
+
 
 _update :: proc(layer: ^Layer, delta: f32) {
-    update_camera_vectors(&main_camera)    
 }
 
 _render :: proc(layer: ^Layer, command_buffer: ^CommandBuffer) {
@@ -52,25 +66,22 @@ _render :: proc(layer: ^Layer, command_buffer: ^CommandBuffer) {
     cmd_set_pipeline(command_buffer, data.default_renderer.pipeline)
 
     view: matrix[4,4]f32
-    if main_camera.projection == .Orthographic {
-        view = matrix_look_at(
-            main_camera.position,
-            main_camera.position + VECTOR_FORWARD,
-            VECTOR_UP
-        )
-    } else {
-        view = matrix_look_at(
-            main_camera.position,
-            main_camera.position + main_camera.forward,
-            main_camera.up
-        )
-    }
+    proj: matrix[4,4]f32
     
-    proj: matrix[4, 4]f32
-    if main_camera.projection == .Orthographic {
-        proj = get_orthographic_projection(main_camera)
-    } else {
-        proj = get_perspective_projection(main_camera)
+    switch v in main_camera.type {
+        case Orthographic:
+        case Perspective:
+            view = mat4_view(
+                eye=main_camera.position,
+                target=main_camera.position + forward_from_euler(main_camera.type.(Perspective).rotation * DEG_TO_RAD),
+                up=VECTOR_UP
+            )
+            proj = mat4_perspective_projection(
+                fov_y_radians=DEG_TO_RAD*main_camera.type.(Perspective).fov,
+                aspect=16.0 / 9.0,
+                near=0.1,
+                far=100
+            )
     }
     
     uniforms := UniformData {
@@ -102,48 +113,53 @@ _render :: proc(layer: ^Layer, command_buffer: ^CommandBuffer) {
 _events :: proc(layer: ^Layer) {
     data := cast(^TestLayerData)layer.data
 
-    m: f32 = 3.33
-    if key_is_held(.LeftArrow) {
-        main_camera.position.x -= delta_time() * m
-    }
-    else if key_is_held(.RightArrow) {
-        main_camera.position.x += delta_time() * m    
+
+    if input_mouse_button_is_held(.Middle) {
+        if val, ok := &main_camera.type.(Perspective); ok {
+            val.rotation.y -= input_mouse_delta(.X) * 20 * delta_time()
+            val.rotation.x += input_mouse_delta(.Y) * 20 * delta_time()
+        }
     }
 
-    if key_is_held(.UpArrow) {
-        main_camera.position.y += delta_time() * m
+    m: f32 = 2.75
+    if input_key_is_held(.A) {
+        main_camera.position -= right_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
     }
-    else if key_is_held(.DownArrow) {
-        main_camera.position.y -= delta_time() * m    
+    if input_key_is_held(.D) {
+        main_camera.position += right_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
+    }
+
+    if input_key_is_held(.W) {
+        main_camera.position += up_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
+    }
+    if input_key_is_held(.S) {
+        main_camera.position -= up_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
     }
     
-    if v := scroll_directional_vector(.Y); vector_length(v) > 0 {
-        main_camera.position.z -= v.y * 0.2
+    if input_mouse_button_is_held(.Left) {
+        main_camera.position += forward_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
+    }
+    if input_mouse_button_is_held(.Right) {
+        main_camera.position -= forward_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
     }
 
-    if mouse_button_is_held(.Middle) {
-        main_camera.rotation.y += mouse_directional(.X) * 0.4 * delta_time()
-        main_camera.rotation.x += mouse_directional(.Y) * 0.4 * delta_time()
-    }
-
-	if key_went_down(.E) {
+	if input_key_went_down(.E) {
 		//fmt.println("Pressed E LayerOne")
         
         for i in 0..<5 {
+
+            model := mat4_model(
+                Vector3{} + random_unit_vector_spherical(),
+                Vector3{},
+                Vector3{1, 1, 1}
+            )
+
             append(&data.instance_data, InstanceData {
-                matrix_model(
-                quad.position + random_unit_vector_spherical(),
-                quad.rotation * RAD_TO_DEG,
-                quad.scale
-            )})            
+                model
+            })            
         }        
 	}
-
-    if key_went_down(.W) {
-        main_camera.projection = .Perspective
-    }
 }
-
 
 Entity :: struct {
     using transform: Transform,
@@ -218,9 +234,24 @@ main :: proc() {
     layer := create_test_layer()
     add_layer(&layer)
     
-    application_new_window(launch_config, SecondaryWindow)
-    layer_n := create_test_layer()
-    add_layer(&layer_n, 1)
+    // application_new_window(launch_config, SecondaryWindow)
+    // layer_n := create_test_layer()
+    // add_layer(&layer_n, 1)
 
     run()
 }
+
+import "core:fmt"
+reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> (err: bool) {
+	fmt.println("Tracking allocator: ")
+
+	for _, val in a.allocation_map {
+		fmt.printfln("%v: Leaked %v bytes", val.location, val.size)
+		err = true
+	}
+
+	mem.tracking_allocator_clear(a)
+
+	return
+}
+

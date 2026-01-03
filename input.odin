@@ -19,9 +19,9 @@ Input :: struct {
 	mouse_held: #sparse [InputMouseButton]bool,
 	mouse_released: #sparse [InputMouseButton]bool,
 
-	mouse_position: [2]f64,
-	mouse_move_delta: [2]f64,
-	mouse_scroll_delta: [2]f64,
+	mouse_position: Vector2,
+	mouse_move_delta: Vector2,
+	mouse_scroll_delta: Vector2,
 
 	events: [MAX_INPUT_EVENTS_CAPACITY]Event,
 	event_count: int,
@@ -132,12 +132,12 @@ update_input_state :: proc() {
 				g_input.mouse_held[e.button] = false
 			case MousePositionEvent:
 				
-				g_input.mouse_move_delta = {e.x - g_input.mouse_position.x, e.y - g_input.mouse_position.y}
-				g_input.mouse_position = {e.x, e.y}
+				g_input.mouse_move_delta = {f32(e.x) - g_input.mouse_position.x, f32(e.y) - g_input.mouse_position.y}
+				g_input.mouse_position = {f32(e.x), f32(e.y)}
 
 			case MouseScrollEvent:
 				
-				g_input.mouse_scroll_delta = {e.x, e.y}
+				g_input.mouse_scroll_delta = {f32(e.x), f32(e.y)}
 		}
 	}
 }
