@@ -24,15 +24,25 @@ application: ^Application
 
 ApplicationWindow :: struct {
 	window: ^Window,
+	window_index: int,
 	flags: WindowFlags,
 	renderer: ^Renderer,
 	
-	layers: [dynamic]^Layer,
+	layers: [dynamic]Layer,
+}
+
+
+when ODIN_DEBUG {
+MAX_WINDOWS :: 4
+} else {
+MAX_WINDOWS :: 1
 }
 
 Application :: struct {
 	//ctx: runtime.Context,
-	windows: [dynamic]ApplicationWindow,
+	windows: [MAX_WINDOWS]ApplicationWindow,
+	window_count: int,
+
 	shutdown_requested: bool,
 
 	start_time: time.Tick,
@@ -46,49 +56,75 @@ WindowConfig :: struct {
 	title: string,
 }
 
+application_arena: mem.Arena
+
 application_init :: proc(config: WindowConfig) {
 	assert(application == nil, "Only one application can be created at a time!")
 	
-	application = new(Application)
-
-	g_input = new(Input)
-	g_input.mouse_position = {f64(config.width) / 2, f64(config.height) / 2}
-	g_input.events = make([dynamic]Event, 0, 64)
-
-	application.shutdown_requested = false
+	backing := make([]byte, (
+		size_of(Application)
+	))
+	mem.arena_init(&application_arena, backing)
+	arena_alloc := mem.arena_allocator(&application_arena)
+	
+	application = new(Application, arena_alloc)
 	application.start_time = time.tick_now()
 
-	//application.ctx = context
-	application.windows = make([dynamic]ApplicationWindow)
-
+	input_init()
+	g_input.mouse_position = {f32(config.width) / 2, f32(config.height) / 2}
+	
 	application_new_window(config, LaunchWindow, true)
 }
 
+_application_destroy :: #force_inline proc() {
+	delete(application_arena.data)
+	mem.arena_free_all(&application_arena)
+}
+
+_application_shutdown :: #force_inline proc() {
+	input_destroy()
+	_application_destroy()
+}
+
 application_new_window :: proc(config: WindowConfig, flags: WindowFlags, set_key: bool = false) {
-	window := window_create_mac(
-		width = config.width,
-		height = config.height,
-		title = config.title,
-		flags = flags,
-	)
-	window.i = _i
-	window.is_focused = set_key
-
-	window_renderer := metal_init(window)
-
-	application_window := ApplicationWindow {
-		window = window,
-		renderer = window_renderer,
-
-		flags = flags,
-		layers = make([dynamic]^Layer)
+	if application.window_count >= MAX_WINDOWS {
+		log.warnf("Trying to create more than %v windows", MAX_WINDOWS)
+		return
+	}
+	
+	when ODIN_OS == .Darwin {
+		window := window_create_mac(
+			width = config.width,
+			height = config.height,
+			title = config.title,
+			flags = flags,
+		)
+	} else {
+		window := nil
 	}
 
-	append(&application.windows, application_window)
+	window.is_focused = set_key
+	
+	when RENDERER == .Metal {
+		window_renderer := metal_init(window)
+	} else {
+		window_renderer := nil
+	}
 
-	defer { _i += 1}
+
+	index := application.window_count
+	application_window := ApplicationWindow {
+		window = window,
+		window_index = index,
+		renderer = window_renderer,
+		flags = flags,
+		layers = make([dynamic]Layer)
+	}
+
+	application.windows[index] = application_window
+	application.window_count += 1
 }
-_i : int
+
 
 add_layer :: proc(layer: ^Layer, index: int = 0) {
 	
@@ -96,8 +132,7 @@ add_layer :: proc(layer: ^Layer, index: int = 0) {
 		layer->on_attach()
 	}
 	
-	append(&application.windows[index].layers, layer)
-	
+	append(&application.windows[index].layers, layer^)
 }
 
 
@@ -112,15 +147,42 @@ Layer :: struct {
 	data: uintptr,
 }
 
-application_request_shutdown :: proc() {
+application_request_shutdown :: #force_inline proc() {
 	application.shutdown_requested = true
 }
 
-delta_time :: proc() -> f32 {
+delta_time :: #force_inline proc() -> f32 {
 	return application.delta_time
 }
 
+close_window :: proc(app_window: ^ApplicationWindow) {
+	if .MainWindow in app_window.flags {
+		application_request_shutdown()
+	}
+
+	#reverse for &layer in app_window.layers {
+		if layer.on_detach != nil {
+			layer->on_detach()
+		}
+	}
+	delete(app_window.layers)
+
+	app_window.renderer.cleanup(app_window.window, app_window.renderer)
+	app_window.window.close(app_window.window)
+	
+	application.window_count -= 1
+	index := app_window.window_index
+	if index != application.window_count {
+		application.windows[index] = application.windows[application.window_count]
+	}
+
+	if application.window_count > 0 {
+		application.windows[application.window_count].window.is_focused = true
+	}
+}
+
 run :: proc() {
+	defer _application_shutdown()
 	
 	previous_time := time.tick_now()
 	for !application.shutdown_requested {
@@ -133,29 +195,17 @@ run :: proc() {
 		previous_time = time.tick_now()
 
 		reset_input_state()
-		defer clear(&g_input.events)
-
 		process_events()
 		update_input_state()
+		defer input_clear_events()
 	
 		// Handle window closing
-		#reverse for &app_window, i in application.windows {
-			if app_window.window.close_requested {
-				if .MainWindow in app_window.flags {
-					application_request_shutdown()
-				}
-
-				//app_window.renderer.cleanup()
-				app_window.window.close(app_window.window)
-				ordered_remove(&application.windows, i)
-
-				if len(application.windows) > 0 {
-					application.windows[len(application.windows) - 1].window.is_focused = true
-				}
-			}
+		#reverse for &app_window in application.windows[:application.window_count] {
+			if !app_window.window.close_requested do continue
+			close_window(&app_window)			
 		}
 
-		for app_window in application.windows {
+		for app_window in application.windows[:application.window_count] {
 			if app_window.window.is_focused {
 				#reverse for &layer in app_window.layers {
 					if layer.on_event != nil {
@@ -171,14 +221,14 @@ run :: proc() {
 			}
 		}
 
+		// Clean this up
 		render_cmd_buffer := init_command_buffer()
 		defer destroy_command_buffer(&render_cmd_buffer)
 
-		for app_window in application.windows {
-			if len(app_window.layers) == 0 {
-				continue
-			}
-			set_render_target(app_window.renderer.platform)
+		for app_window in application.windows[:application.window_count] {
+			if len(app_window.layers) == 0 do continue
+			
+			set_render_state(app_window.renderer.platform)
 
 			for &layer in app_window.layers {
 				if layer.render != nil {
@@ -191,30 +241,12 @@ run :: proc() {
 		}
 	}
 	
-	set_render_target :: proc(platform: Platform) {
-		render_state = cast(^MetalPlatform)platform
+	set_render_state :: proc(platform: Platform) {
+		when ODIN_OS == .Darwin {
+			render_state = cast(^MetalPlatform)platform
+		} else {
+			assert(false)
+		}
 	}
-
-	// for &aw in application.windows {
-	// 	delete(aw.layers)
-	// 	aw.renderer.cleanup(aw.window, aw.renderer)
-	// 	aw.window.close(aw.window)
-	// }
-
-	// delete(application.windows)
-
-	// free(application)
 }
 
-reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> (err: bool) {
-	fmt.println("Tracking allocator: ")
-
-	for _, val in a.allocation_map {
-		fmt.printfln("%v: Leaked %v bytes", val.location, val.size)
-		err = true
-	}
-
-	mem.tracking_allocator_clear(a)
-
-	return
-}

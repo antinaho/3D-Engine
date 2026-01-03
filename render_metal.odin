@@ -666,8 +666,16 @@ execute_begin_pass :: proc(
     command_buffer: ^MTL.CommandBuffer,
     cmd: BeginPassCommand,
 ) {
-    render_state.encoder = command_buffer->renderCommandEncoderWithDescriptor(cast(^MTL.RenderPassDescriptor)cmd.renderpass_descriptor)
+    pass := cast(^MTL.RenderPassDescriptor)cmd.renderpass_descriptor
     
+    clear_color := MTL.ClearColor{70.0 / 255.5, 55.0 / 255.0, 60.0 / 255.0, 1.0}
+    color_attachment := pass->colorAttachments()->object(0)
+    color_attachment->setClearColor(clear_color)
+	color_attachment->setLoadAction(.Clear)
+	color_attachment->setStoreAction(.Store)
+    color_attachment->setTexture(render_state.drawable->texture())
+    
+    render_state.encoder = command_buffer->renderCommandEncoderWithDescriptor(pass)
     label := NS.String.alloc()->initWithOdinString(cmd.name)
     render_state.encoder->setLabel(label)
 }
@@ -675,7 +683,6 @@ execute_begin_pass :: proc(
 @(private)
 execute_end_pass :: proc() {
     render_state.encoder->endEncoding()
-    //Maybe set platform.encoder to nil?
 }
 
 @(private)
@@ -753,22 +760,24 @@ execute_bind_sampler :: proc(cmd: BindSamplerCommand) {
 
 @(private)
 execute_set_uniform :: proc(cmd: SetUniformCommand) {
+    b := make([]byte, cmd.size, context.temp_allocator)
     switch cmd.stage {
     case .Vertex:
+        
+        mem.copy(raw_data(b), cmd.data, cmd.size)
         render_state.encoder->setVertexBytes(
-            slice.bytes_from_ptr(cmd.data, cmd.size),
+            b,
             NS.UInteger(cmd.slot),
         )
     case .Fragment:
+        mem.copy(raw_data(b), cmd.data, cmd.size)
         render_state.encoder->setFragmentBytes(
-            slice.bytes_from_ptr(cmd.data, cmd.size),
+            b,
             NS.UInteger(cmd.slot),
         )
     case .Compute:
         assert(false, "Trying to set uniform for Compute buffer")
     }
-
-    free(cmd.data)
 }
 
 @(private)

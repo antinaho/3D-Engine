@@ -24,7 +24,6 @@ Window :: struct {
 	is_visible: bool,
 	is_minimized: bool,
 	is_focused: bool,
-	i: int,
 }
 
 WindowFlag :: enum {
@@ -77,9 +76,9 @@ WindowDidResignKey :: struct { window: ^Window }
 WindowBecameVisibleEvent :: struct { window: ^Window }
 WindowBecameHiddenEvent :: struct { window: ^Window }
 
-KeyPressedEvent :: struct { key: KeyboardKey }
-KeyReleasedEvent :: struct { key: KeyboardKey }
-MousePressedEvent :: struct { button: MouseButton }
-MouseReleasedEvent :: struct { button: MouseButton }
+KeyPressedEvent :: struct { key: InputKeyboardKey }
+KeyReleasedEvent :: struct { key: InputKeyboardKey }
+MousePressedEvent :: struct { button: InputMouseButton }
+MouseReleasedEvent :: struct { button: InputMouseButton }
 MousePositionEvent :: struct { x, y: f64 }
 MouseScrollEvent :: struct { x, y: f64 }
