@@ -4,6 +4,34 @@ import "core:log"
 import "core:mem"
 import "core:math"
 
+
+// DebugLayerData :: struct {
+//     vertex_buf: Buffer,
+//     index_buf: Buffer,
+//     instance_buf: Buffer,
+
+//     grid_texture: Texture,
+// }
+
+// _debug_attach :: proc(layer: ^Layer) {
+//     data := cast(^DebugLayerData)layer.data
+
+//     data^ = {
+//         vertex_buf = init_buffer_with_size(size_of(Vertex) * 4, .Vertex, .Static),
+//         index_buf = init_buffer_with_size(size_of(u32) * 6, .Vertex, .Static),
+//         instance_buf = init_buffer_with_size(size_of(InstanceData), .Vertex, .Dynamic),
+//         grid_texture = load_texture({
+//             filepath = "textures/PNG/Dark/texture_01.png",
+//             format = .RGBA8_UNorm
+//         })
+//     }
+// }
+
+// _debug_render :: proc(layer: ^Layer, command_buffer: ^CommandBuffer) {
+//     data := cast(^DebugLayerData)layer.data
+// }
+
+
 TestLayerData :: struct {
     default_renderer: DefaultRenderer,
     vertex_buf: Buffer,
@@ -25,22 +53,28 @@ create_test_layer :: proc() -> Layer {
 }
 
 _attach :: proc(layer: ^Layer) {
-
-    log.debug(65 * DEG_TO_RAD)
-    log.debug(70 * DEG_TO_RAD)
-
     d := cast(^TestLayerData)layer.data
     d^ = {
-        default_renderer = init_default_renderer(1280, 720),
+        default_renderer = init_default_renderer(),
         vertex_buf = init_buffer_with_size(size_of(Vertex) * 1000, .Vertex, .Dynamic),
         instance_buf = init_buffer_with_size(size_of(InstanceData) * 1000, .Vertex, .Dynamic),
         index_buf = init_buffer_with_size(size_of(u32) * 1000, .Index, .Dynamic),
         instance_data = make([dynamic]InstanceData),
     }
+
+    entities = make(map[EntityType][dynamic]^Entity)
 }
 
 _detach :: proc(layer: ^Layer) {
     d := cast(^TestLayerData)layer.data
+
+    for k, &e in entities {
+        for i in e {
+            free(i)
+        }
+        delete(e)
+    }
+    delete(entities)
 
     free(d.default_renderer.pipeline.handle)
     release_buffer(&d.vertex_buf)
@@ -51,18 +85,26 @@ _detach :: proc(layer: ^Layer) {
 }
 
 
+import "core:math/rand"
 _update :: proc(layer: ^Layer, delta: f32) {
+    for k, ents in entities {
+        for &e in ents {
+            e.rotation.z += rand.float32() * delta
+        }
+    }
 }
 
-_render :: proc(layer: ^Layer, command_buffer: ^CommandBuffer) {
+_render :: proc(layer: ^Layer, renderer: ^Renderer, command_buffer: ^CommandBuffer) {
+
+    main_camera.aspect = f32(renderer.msaa_texture.desc.width) / f32(renderer.msaa_texture.desc.height)
+
     data := cast(^TestLayerData)layer.data
     cmd_update_renderpass_descriptors(command_buffer, Update_Renderpass_Desc{
-        renderpass_descriptor=data.default_renderer.renderpass_descriptor,
-        msaa_texture = data.default_renderer.msaa_render_target_texture,
-        depth_texture = data.default_renderer.depth_texture,
+        msaa_texture = renderer.msaa_texture,
+        depth_texture = renderer.depth_texture,
     })
 
-    cmd_begin_pass(command_buffer, "Test", data.default_renderer.renderpass_descriptor)
+    cmd_begin_pass(command_buffer, "Test")
     cmd_set_pipeline(command_buffer, data.default_renderer.pipeline)
 
     view: matrix[4,4]f32
@@ -78,37 +120,73 @@ _render :: proc(layer: ^Layer, command_buffer: ^CommandBuffer) {
             )
             proj = mat4_perspective_projection(
                 fov_y_radians=DEG_TO_RAD*main_camera.type.(Perspective).fov,
-                aspect=16.0 / 9.0,
-                near=0.1,
-                far=100
+                aspect=main_camera.aspect,
+                near=main_camera.near,
+                far=main_camera.far,
             )
     }
     
-    uniforms := UniformData {
+    scene_uniforms := SceneUniformData {
         view = view,
         projection = proj,
     }
-    cmd_set_uniform(command_buffer, uniforms, 1, .Vertex)
 
-    if len(data.instance_data) == 0 {
-        cmd_end_pass(command_buffer)
-        return
+    InstanceBatch :: struct {
+        offset: int,    
+        count: int,     
     }
 
-    fill_buffer(&data.vertex_buf, raw_data(QuadMesh.verteces), size_of(Vertex) * len(QuadMesh.verteces), 0)
-    fill_buffer(&data.index_buf,  raw_data(QuadMesh.indices),  size_of(u32) * len(QuadMesh.indices), 0)
-    fill_buffer(&data.instance_buf, raw_data(data.instance_data), size_of(InstanceData) * len(data.instance_data), 0)
+    cmd_set_uniform(command_buffer, scene_uniforms, 1, .Vertex)
+    clear(&data.instance_data)
+    batches := make(map[EntityType]InstanceBatch, context.temp_allocator)
+    
+    {
+        for entity_type, ents in entities {
+            if len(ents) == 0 do continue
+            offset := len(data.instance_data)
+            for e in ents {
+                model := mat4_model(e.position, e.rotation, e.scale)
+                append(&data.instance_data, InstanceData{model, {1, 1}, {0, 0}})
+            }
+            batches[entity_type] = InstanceBatch{
+                offset = offset,
+                count = len(ents),
+            }
+        }
 
-    cmd_bind_vertex_buffer(command_buffer, data.vertex_buf, 0, 0)
-    cmd_bind_vertex_buffer(command_buffer, data.instance_buf, 0, 2)
-    cmd_bind_index_buffer(command_buffer, data.index_buf, 0)
-    cmd_bind_texture(command_buffer, data.default_renderer.custom_texture, 0, .Fragment)
-    cmd_bind_sampler(command_buffer, data.default_renderer.default_sampler, 0, .Fragment)
+        fill_buffer(
+            &data.instance_buf,
+            raw_data(data.instance_data),
+            size_of(InstanceData) * len(data.instance_data),
+            0,
+        )
 
-    cmd_draw_indexed_with_instances(command_buffer, len(QuadMesh.indices), data.index_buf, len(data.instance_data))
+        for entity_type, ents in entities {
+            batch := batches[entity_type]
+            if batch.count == 0 do continue
 
-    cmd_end_pass(command_buffer)
+            fill_buffer(&data.vertex_buf, raw_data(vertices_of(entity_type)), size_of(Vertex) * len(vertices_of(entity_type)), 0)
+            fill_buffer(&data.index_buf, raw_data(indices_of(entity_type)), size_of(u32) * len(indices_of(entity_type)), 0)
+            
+            cmd_bind_vertex_buffer(command_buffer, data.vertex_buf, 0, 0)
+            cmd_bind_vertex_buffer(command_buffer, data.instance_buf, batch.offset * size_of(InstanceData), 2)
+            cmd_bind_index_buffer(command_buffer, data.index_buf, 0)
+            
+            cmd_bind_texture(command_buffer, data.default_renderer.custom_texture, 0, .Fragment)
+            cmd_bind_sampler(command_buffer, data.default_renderer.default_sampler, 0, .Fragment)
+            
+            cmd_draw_indexed_with_instances(
+                command_buffer,
+                len(indices_of(entity_type)),
+                data.index_buf,
+                batch.count,  
+            )
+
+        }
+        cmd_end_pass(command_buffer)
+    }
 }
+
 
 _events :: proc(layer: ^Layer) {
     data := cast(^TestLayerData)layer.data
@@ -144,27 +222,93 @@ _events :: proc(layer: ^Layer) {
     }
 
 	if input_key_went_down(.E) {
-		//fmt.println("Pressed E LayerOne")
-        
+        log.debug("E")        
         for i in 0..<5 {
 
-            model := mat4_model(
-                Vector3{} + random_unit_vector_spherical(),
-                Vector3{},
-                Vector3{1, 1, 1}
-            )
+            quad := new_entity(Quad)
+            quad.mesh = &quad_mesh
+            quad.position = random_unit_vector_spherical() + VECTOR_RIGHT * 2
+            quad.rotation = {}
+            quad.scale = {1, 1, 1}
 
-            append(&data.instance_data, InstanceData {
-                model
-            })            
-        }        
+
+            if raw_data(entities[.Quad]) == nil {
+                entities[.Quad] = make([dynamic]^Entity)
+            }
+
+            append(&entities[.Quad], quad)          
+        }
 	}
+
+    if input_key_went_down(.Q) {
+        log.debug("E")        
+        for i in 0..<5 {
+
+            triangle := new_entity(Triangle)
+            triangle.mesh = &triangle_mesh
+            triangle.position = random_unit_vector_spherical() + VECTOR_RIGHT * -2
+            triangle.rotation = {}
+            triangle.scale = {1, 1, 1}
+
+
+            if raw_data(entities[.Triangle]) == nil {
+                entities[.Triangle] = make([dynamic]^Entity)
+            }
+
+            append(&entities[.Triangle], triangle)          
+        }
+	}
+}
+
+EntityType :: enum {
+    Quad,
+    Triangle,
+}
+
+vertices_of :: proc(e: EntityType) -> []Vertex {
+
+    switch e {
+        case .Quad:
+            return quad_mesh.verteces
+        case .Triangle:
+            return triangle_mesh.verteces
+    }
+    log.panic("")
+}
+
+indices_of :: proc(e: EntityType) -> []u32 {
+
+    switch e {
+        case .Quad:
+            return quad_mesh.indices
+        case .Triangle:
+            return triangle_mesh.indices
+
+    }
+    log.panic("")
+}
+
+entities: map[EntityType][dynamic]^Entity
+
+new_entity :: proc($T: typeid) -> ^Entity {
+    t := new(T)
+    t.derived = t^
+    return t
+}
+
+Quad :: struct {
+    using _ : Entity,
+    vel: Vector3,
+}
+
+Triangle :: struct {
+    using _ : Entity,
 }
 
 Entity :: struct {
     using transform: Transform,
     mesh: ^Mesh,
-    vel: Vector3,
+    derived: any,
 }
 
 Transform :: struct {
@@ -176,6 +320,13 @@ Transform :: struct {
 Mesh :: struct {
     verteces: []Vertex,
     indices: []u32,
+    material: Material,
+}
+
+BaseMaterial :: Material {
+    scale = {1, 1},
+    offset = {0, 0},
+    tex_indices = 1 << 0,
 }
 
 QuadMesh :: Mesh {
@@ -188,25 +339,37 @@ QuadMesh :: Mesh {
     indices = []u32 {
         0, 1, 2, 2, 3, 0,
     },
+    material = BaseMaterial,
 }
-
 @(rodata)
 quad_mesh := QuadMesh
 
-quad := Entity {
-    position = {0, 0, 0},
-    rotation = {0, 0, 0},
-    scale = {1, 1, 1},
-    mesh = &quad_mesh,
+TriangleMesh :: Mesh {
+    verteces = []Vertex {
+        {position={-0.5, -0.5, 0}, normal={0,0,1}, color={1,1,1,1}, uvs={0,0}},
+        {position={ 0.5, -0.5, 0}, normal={0,0,1}, color={1,1,1,1}, uvs={1,0}},
+        {position={ 0.5,  0.5, 0}, normal={0,0,1}, color={1,1,1,1}, uvs={1,1}},
+    },
+    indices = []u32 {
+        0, 1, 2
+    },
 }
+triangle_mesh := TriangleMesh
+
 
 InstanceData :: struct #align(16) {
     model:      matrix[4, 4]f32,
+    texture_scale: [2]f32,
+    texture_offset: [2]f32,
 }
 
-UniformData :: struct #align(16) {
+SceneUniformData :: struct #align(16) {
     view:        matrix[4, 4]f32,
     projection:  matrix[4, 4]f32,
+}
+
+MaterialUniformData :: struct #align(16) {
+
 }
 
 main :: proc() {
