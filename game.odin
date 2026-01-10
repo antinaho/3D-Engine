@@ -330,6 +330,23 @@ SceneUniformData :: struct #align(16) {
     projection:  matrix[4, 4]f32,
 }
 
+//
+
+
+
+
+
+
+//
+
+
+
+
+
+
+
+
+
 import p "pohja"
 import r "huuru"
 
@@ -399,20 +416,17 @@ main :: proc() {
         { 0.5, -0.5, 0.0, 0.0},  // bottom right
     }
 
-    vertex_buffer := r.create_buffer(r_id, r.Buffer_Desc{
-        type = .Vertex,
-        data = &vertices,
-        size = size_of(vertices),
-    })
+    a := cast(^r.Renderer_State_Header)r.get_state_from_id(r_id)
+    r.push_buffer(r_id, a.vertex_buffer, &vertices, 0, size_of(vertices))
 
     for !p.platform_should_close() {
         p.platform_update()
         r.begin_frame(r_id)
         r.bind_pipeline(r_id, pipeline)
-        r.draw(r_id, vertex_buffer, 3)
+        r.draw(r_id, a.vertex_buffer, 3)
         r.end_frame(r_id)
     }
-    
+
     p.cleanup()
 }
 

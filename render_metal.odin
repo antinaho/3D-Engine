@@ -264,7 +264,7 @@ metal_init_buffer :: proc(
     }
 }
 
-metal_fill_buffer :: proc(buffer: ^Buffer, data: rawptr, size: int, offset: int) {
+metal_fill_buffer :: proc(buffer: ^Buffer, data: rawptr, length: int, offset: int) {
     assert(buffer != nil, "Trying to fill null buffer.")
 
     metal_buffer := cast(^MTL.Buffer)buffer.handle
@@ -272,14 +272,14 @@ metal_fill_buffer :: proc(buffer: ^Buffer, data: rawptr, size: int, offset: int)
     
     contents := metal_buffer->contents()
     dest := mem.ptr_offset(raw_data(contents), offset)
-    mem.copy(dest, data, size)
+    mem.copy(dest, data, length)
     
     // On MacOS, Shared buffers need manual sync. Not in iOS
     when MACOS {
         if buffer.access == .Dynamic {
             metal_buffer->didModifyRange(NS.Range{
                 location = NS.UInteger(offset),
-                length   = NS.UInteger(size),
+                length   = NS.UInteger(length),
             })
         }
     }
