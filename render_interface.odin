@@ -5,49 +5,43 @@ RendererType :: enum {
 }
 
 when ODIN_OS == .Darwin {
-    RENDERER :: RendererType.Metal
+    RENDERER_KIND :: RendererType.Metal
 } else {
-    RENDERER :: 0
+    RENDERER_KIND :: 0
 }
-
 
 Renderer :: struct {
     using api: RendererAPI,
-    platform: Platform,
+    platform: _Platform,
+
+
+    msaa_texture: Texture,
+    depth_texture: Texture,
 }
 
 RendererAPI :: struct {
-    draw: proc(window: ^Window, renderer: ^Renderer, command_buffer: ^CommandBuffer),
-    cleanup: proc(window: ^Window, renderer: ^Renderer),
+    draw: proc(application_window: ^ApplicationWindow, command_buffer: ^CommandBuffer),
+    cleanup: proc(application_window: ^ApplicationWindow),
 }
-
-
-
-
-
-
-
-
 
 DefaultRenderer :: struct {
     pipeline: Pipeline,
-    
-    // Render targets
-    msaa_render_target_texture: Texture,
-    depth_texture: Texture,
-    
-    // Resources
+
     default_sampler: TextureSampler,
-    renderpass_descriptor: rawptr,
     custom_texture: Texture,
-    
-    // Per-frame
-    vertex_buffer: Buffer,
-    index_buffer: Buffer,
+}
+
+Color :: [4]u8
+Material :: struct {
+    albedo_tex: Texture,
+    albedo_color: Color,
+
+    texture_scale: [2]f32,
+    texture_offset: [2]f32,
 }
 
 DEFAULT_MSAA_SAMPLE_COUNT :: 4
-create_default_pipeline :: proc() -> Pipeline {
+create_opaque_pipeline :: proc() -> Pipeline {
 
     vertex_shader, v_ok := load_shader("shaders/shaders.metal", .Vertex, "vertex_m")
     fragment_shader, f_ok := load_shader("shaders/shaders.metal", .Fragment, "fragment_m")
@@ -105,38 +99,17 @@ alpha_blend :: BlendState{
     alpha_op  = .Add,
 }
 
-init_default_renderer :: proc(
-    width: int,
-    height: int,
-) -> (renderer: DefaultRenderer) {
+init_default_renderer :: proc() -> (renderer: DefaultRenderer) {
     
     // Pipeline
-    renderer.pipeline = create_default_pipeline()
-
-    // Create MSAA color target
-    renderer.msaa_render_target_texture = create_texture(TextureDesc{
-        format = .BGRA8_UNorm,
-        usage = .RenderTarget,
-        type = .Texture2DMultisample,
-        sample_count = DEFAULT_MSAA_SAMPLE_COUNT,
-        mip_levels = 1,
-    })
+    renderer.pipeline = create_opaque_pipeline()
 
     // Load texture
     renderer.custom_texture = load_texture(TextureLoadDesc{
         filepath = "textures/splash.png",
         format = .RGBA8_UNorm
     })
-    
-    // Create depth texture
-    renderer.depth_texture = create_texture(TextureDesc{
-        format = .Depth32_Float,
-        usage = .Depth,
-        type = .Texture2DMultisample,
-        sample_count = DEFAULT_MSAA_SAMPLE_COUNT,
-        mip_levels = 1,
-    })
-    
+        
     // Create sampler
     renderer.default_sampler = create_sampler(TextureSamplerDesc{
         min_filter = .Linear,
@@ -148,66 +121,5 @@ init_default_renderer :: proc(
         max_anisotropy = 1,
     })
 
-    // Renderpass descriptor
-    renderer.renderpass_descriptor = create_renderpass_descriptor(RenderPassDescriptor {
-        name="Test",
-        clear_color = {235 / 255.0, 177 / 255.0 , 136 / 255.0,1.0},
-        load_action =.Clear,
-        msaa_texture=renderer.msaa_render_target_texture,
-        depth_texture=renderer.depth_texture,
-    })
-
     return renderer
-}
-
-RenderPassDescriptor :: struct {
-    name: string,
-    clear_color: [4]f32,
-    //clear_depth: f32,
-    load_action: LoadAction,
-    
-    msaa_texture: Texture,
-    depth_texture: Texture,
-}
-
-create_renderpass_descriptor :: proc(desc: RenderPassDescriptor) -> rawptr {
-    when RENDERER == .Metal {
-        return metal_create_renderpass_descriptor(desc)
-    } else when RENDERER == .Vulkan {
-        
-    }
-}
-
-resize_default_renderer :: proc(renderer: ^DefaultRenderer, width: int, height: int) {
-    // Destroy old textures
-    destroy_texture(&renderer.msaa_render_target_texture)
-    destroy_texture(&renderer.depth_texture)
-    
-    // Recreate with new size
-    renderer.msaa_render_target_texture = create_texture(TextureDesc{
-        width = width,
-        height = height,
-        format = .BGRA8_UNorm_sRGB,
-        usage = .RenderTarget,
-        type = .Texture2D,
-        sample_count = 4,
-        mip_levels = 1,
-    })
-    
-    renderer.depth_texture = create_texture(TextureDesc{
-        width = width,
-        height = height,
-        format = .Depth32_Float,
-        usage = .Depth,
-        type = .Texture2D,
-        sample_count = 4,
-        mip_levels = 1,
-    })
-}
-
-destroy_default_renderer :: proc(renderer: ^DefaultRenderer) {
-    destroy_pipeline(&renderer.pipeline)
-    destroy_texture(&renderer.msaa_render_target_texture)
-    destroy_texture(&renderer.depth_texture)
-    destroy_sampler(&renderer.default_sampler)
 }

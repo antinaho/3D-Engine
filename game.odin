@@ -3,34 +3,7 @@ package main
 import "core:log"
 import "core:mem"
 import "core:math"
-
-
-// DebugLayerData :: struct {
-//     vertex_buf: Buffer,
-//     index_buf: Buffer,
-//     instance_buf: Buffer,
-
-//     grid_texture: Texture,
-// }
-
-// _debug_attach :: proc(layer: ^Layer) {
-//     data := cast(^DebugLayerData)layer.data
-
-//     data^ = {
-//         vertex_buf = init_buffer_with_size(size_of(Vertex) * 4, .Vertex, .Static),
-//         index_buf = init_buffer_with_size(size_of(u32) * 6, .Vertex, .Static),
-//         instance_buf = init_buffer_with_size(size_of(InstanceData), .Vertex, .Dynamic),
-//         grid_texture = load_texture({
-//             filepath = "textures/PNG/Dark/texture_01.png",
-//             format = .RGBA8_UNorm
-//         })
-//     }
-// }
-
-// _debug_render :: proc(layer: ^Layer, command_buffer: ^CommandBuffer) {
-//     data := cast(^DebugLayerData)layer.data
-// }
-
+import "core:fmt"
 
 TestLayerData :: struct {
     default_renderer: DefaultRenderer,
@@ -84,19 +57,18 @@ _detach :: proc(layer: ^Layer) {
     free(d)
 }
 
-
-import "core:math/rand"
 _update :: proc(layer: ^Layer, delta: f32) {
     for k, ents in entities {
+
         for &e in ents {
-            e.rotation.z += rand.float32() * delta
+            //e.rotation.y += delta * 10
         }
     }
 }
 
 _render :: proc(layer: ^Layer, renderer: ^Renderer, command_buffer: ^CommandBuffer) {
 
-    main_camera.aspect = f32(renderer.msaa_texture.desc.width) / f32(renderer.msaa_texture.desc.height)
+    ortho_camera.aspect = f32(renderer.msaa_texture.desc.width) / f32(renderer.msaa_texture.desc.height)
 
     data := cast(^TestLayerData)layer.data
     cmd_update_renderpass_descriptors(command_buffer, Update_Renderpass_Desc{
@@ -110,34 +82,32 @@ _render :: proc(layer: ^Layer, renderer: ^Renderer, command_buffer: ^CommandBuff
     view: matrix[4,4]f32
     proj: matrix[4,4]f32
     
-    switch v in main_camera.type {
-        case Orthographic:
-        case Perspective:
-            view = mat4_view(
-                eye=main_camera.position,
-                target=main_camera.position + forward_from_euler(main_camera.type.(Perspective).rotation * DEG_TO_RAD),
+    view = mat4_view(
+                eye=ortho_camera.position,
+                target=ortho_camera.position + VECTOR_FORWARD,
                 up=VECTOR_UP
             )
-            proj = mat4_perspective_projection(
-                fov_y_radians=DEG_TO_RAD*main_camera.type.(Perspective).fov,
-                aspect=main_camera.aspect,
-                near=main_camera.near,
-                far=main_camera.far,
-            )
-    }
+    proj = mat4_ortho_fixed_height(10, ortho_camera.aspect)
+
+            // proj = mat4_perspective_projection(
+            //     fov_y_radians=DEG_TO_RAD*main_camera.fov,
+            //     aspect=main_camera.aspect,
+            //     near=main_camera.near,
+            //     far=main_camera.far,
+            // )
     
     scene_uniforms := SceneUniformData {
         view = view,
         projection = proj,
     }
 
+    cmd_set_uniform(command_buffer, scene_uniforms, 1, .Vertex)
+    clear(&data.instance_data)
+
     InstanceBatch :: struct {
         offset: int,    
         count: int,     
     }
-
-    cmd_set_uniform(command_buffer, scene_uniforms, 1, .Vertex)
-    clear(&data.instance_data)
     batches := make(map[EntityType]InstanceBatch, context.temp_allocator)
     
     {
@@ -187,38 +157,29 @@ _render :: proc(layer: ^Layer, renderer: ^Renderer, command_buffer: ^CommandBuff
     }
 }
 
+ortho_camera := Camera {
+    position = {0, 0, 1},
+    aspect = 16.0 / 9.0,
+    zoom = 20,
+}
+
 
 _events :: proc(layer: ^Layer) {
     data := cast(^TestLayerData)layer.data
 
-
-    if input_mouse_button_is_held(.Middle) {
-        if val, ok := &main_camera.type.(Perspective); ok {
-            val.rotation.y -= input_mouse_delta(.X) * 20 * delta_time()
-            val.rotation.x += input_mouse_delta(.Y) * 20 * delta_time()
-        }
-    }
-
     m: f32 = 2.75
     if input_key_is_held(.A) {
-        main_camera.position -= right_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
+        ortho_camera.position -= right_from_euler(ortho_camera.rotation*DEG_TO_RAD) * delta_time() * m
     }
     if input_key_is_held(.D) {
-        main_camera.position += right_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
+        ortho_camera.position += right_from_euler(ortho_camera.rotation*DEG_TO_RAD) * delta_time() * m
     }
 
     if input_key_is_held(.W) {
-        main_camera.position += up_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
+        ortho_camera.position += up_from_euler(ortho_camera.rotation*DEG_TO_RAD) * delta_time() * m
     }
     if input_key_is_held(.S) {
-        main_camera.position -= up_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
-    }
-    
-    if input_mouse_button_is_held(.Left) {
-        main_camera.position += forward_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
-    }
-    if input_mouse_button_is_held(.Right) {
-        main_camera.position -= forward_from_euler(main_camera.type.(Perspective).rotation*DEG_TO_RAD) * delta_time() * m
+        ortho_camera.position -= up_from_euler(ortho_camera.rotation*DEG_TO_RAD) * delta_time() * m
     }
 
 	if input_key_went_down(.E) {
@@ -227,8 +188,8 @@ _events :: proc(layer: ^Layer) {
 
             quad := new_entity(Quad)
             quad.mesh = &quad_mesh
-            quad.position = random_unit_vector_spherical() + VECTOR_RIGHT * 2
-            quad.rotation = {}
+            quad.position = random_unit_vector_spherical()// + VECTOR_RIGHT * 2
+            quad.rotation = {0, 0, 0} // {0, 270, 0}
             quad.scale = {1, 1, 1}
 
 
@@ -241,7 +202,7 @@ _events :: proc(layer: ^Layer) {
 	}
 
     if input_key_went_down(.Q) {
-        log.debug("E")        
+        log.debug("Q")        
         for i in 0..<5 {
 
             triangle := new_entity(Triangle)
@@ -324,9 +285,8 @@ Mesh :: struct {
 }
 
 BaseMaterial :: Material {
-    scale = {1, 1},
-    offset = {0, 0},
-    tex_indices = 1 << 0,
+    texture_scale = {1, 1},
+    texture_offset = {0, 0},
 }
 
 QuadMesh :: Mesh {
@@ -353,7 +313,9 @@ TriangleMesh :: Mesh {
     indices = []u32 {
         0, 1, 2
     },
+    material = BaseMaterial,
 }
+@(rodata)
 triangle_mesh := TriangleMesh
 
 
@@ -368,9 +330,8 @@ SceneUniformData :: struct #align(16) {
     projection:  matrix[4, 4]f32,
 }
 
-MaterialUniformData :: struct #align(16) {
-
-}
+import p "pohja"
+import r "huuru"
 
 main :: proc() {
     
@@ -386,25 +347,76 @@ main :: proc() {
     context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
 
-    launch_config := WindowConfig {
-        width = 1280,
-        height = 720,
+    p.init(1)
+
+    id := p.open_window(p.Window_Description {
+        flags = {.MainWindow, .CenterOnOpen},
+        width = 600,
+        height = 600,
         title = "Hellope",
+    })
+
+
+    r.init(1)
+    r_id := r.init_renderer(r.Window_Provider{
+        window_id = rawptr(uintptr(id)),
+        get_size = proc(id: rawptr) -> [2]int {
+            wid := p.Window_ID(uintptr(id))
+            return p.PLATFORM_API.get_window_size(wid)
+        },
+        get_native_handle = proc(id: rawptr) -> rawptr {
+            return rawptr(p.get_native_window_handle(p.Window_ID(uintptr(id))))
+        },
+    })
+    r.set_clear_color(r_id, {50.0 / 255, 40.0 / 255, 70.0 / 255, 1})
+
+    pipeline := r.create_pipeline(r_id, r.Pipeline_Desc{
+        vertex_shader = `
+            using namespace metal;
+            vertex float4 vertex_main(uint vid [[vertex_id]],
+                                    const device float4* positions [[buffer(0)]]) {
+                return float4(positions[vid].xyz, 1.0);
+            }
+        `,
+        fragment_shader = `
+
+            using namespace metal;
+            fragment float4 fragment_main() {
+                return float4(1.0, 0.0, 0.0, 1.0);
+            }
+        `,
+        vertex_layout = r.Vertex_Layout{
+            stride = size_of([4]f32),
+            attributes = []r.Vertex_Attribute{
+                {format = .Float4, offset = 0},
+            },
+        },
+    })
+
+    vertices := [?][4]f32{
+        { 0.0,  0.5, 0.0, 0.0},  // top
+        {-0.5, -0.5, 0.0, 0.0},  // bottom left
+        { 0.5, -0.5, 0.0, 0.0},  // bottom right
     }
 
-    application_init(launch_config)
+    vertex_buffer := r.create_buffer(r_id, r.Buffer_Desc{
+        type = .Vertex,
+        data = &vertices,
+        size = size_of(vertices),
+    })
 
-    layer := create_test_layer()
-    add_layer(&layer)
+    for !p.platform_should_close() {
+        p.platform_update()
+        r.begin_frame(r_id)
+        r.bind_pipeline(r_id, pipeline)
+        r.draw(r_id, vertex_buffer, 3)
+        r.end_frame(r_id)
+    }
     
-    // application_new_window(launch_config, SecondaryWindow)
-    // layer_n := create_test_layer()
-    // add_layer(&layer_n, 1)
-
-    run()
+    p.cleanup()
 }
 
-import "core:fmt"
+
 reset_tracking_allocator :: proc(a: ^mem.Tracking_Allocator) -> (err: bool) {
 	fmt.println("Tracking allocator: ")
 

@@ -23,14 +23,14 @@ vector_normalize :: proc(v: Vector2) -> Vector2 {
     return linalg.vector_normalize(v)
 }
 
-vec3_transform_direction :: proc(m: matrix[4,4]f32, v: Vector3) -> Vector3 {
+vec3_transform_direction :: proc "contextless" (m: matrix[4,4]f32, v: Vector3) -> Vector3 {
     x := m[0,0]*v.x + m[0,1]*v.y + m[0,2]*v.z
     y := m[1,0]*v.x + m[1,1]*v.y + m[1,2]*v.z
     z := m[2,0]*v.x + m[2,1]*v.y + m[2,2]*v.z
     return {x, y, z}
 }
 
-forward_from_euler :: proc(euler_radians: Vector3) -> Vector3 {
+forward_from_euler :: proc "contextless" (euler_radians: Vector3) -> Vector3 {
     R := mat4_rotate_euler(euler_radians)
     f := vec3_transform_direction(R, VECTOR_FORWARD)
     return linalg.normalize(f)
@@ -81,7 +81,7 @@ mat4_translate_vector3 :: proc(v: Vector3) -> matrix[4, 4]f32 {
 }
 
 // ROTATE
-mat4_rotate_x :: proc(angle_radians: f32) -> matrix[4, 4]f32 {
+mat4_rotate_x :: proc "contextless" (angle_radians: f32) -> matrix[4, 4]f32 {
     c := math.cos(angle_radians)
     s := math.sin(angle_radians)
     return {
@@ -92,7 +92,7 @@ mat4_rotate_x :: proc(angle_radians: f32) -> matrix[4, 4]f32 {
     }
 }
 
-mat4_rotate_y :: proc(angle_radians: f32) -> matrix[4, 4]f32 {
+mat4_rotate_y :: proc "contextless" (angle_radians: f32) -> matrix[4, 4]f32 {
     c := math.cos(angle_radians)
     s := math.sin(angle_radians)
     return {
@@ -103,7 +103,7 @@ mat4_rotate_y :: proc(angle_radians: f32) -> matrix[4, 4]f32 {
     }   
 }
 
-mat4_rotate_z :: proc(angle_radians: f32) -> matrix[4, 4]f32 {
+mat4_rotate_z :: proc "contextless" (angle_radians: f32) -> matrix[4, 4]f32 {
     c := math.cos(angle_radians)
     s := math.sin(angle_radians)
     return {
@@ -114,7 +114,7 @@ mat4_rotate_z :: proc(angle_radians: f32) -> matrix[4, 4]f32 {
     }
 }
 
-mat4_rotate_euler :: proc(radians_rotation: Vector3) -> matrix[4, 4]f32 {
+mat4_rotate_euler :: proc "contextless" (radians_rotation: Vector3) -> matrix[4, 4]f32 {
     Rx := mat4_rotate_x(radians_rotation.x)
     Ry := mat4_rotate_y(radians_rotation.y)
     Rz := mat4_rotate_z(radians_rotation.z)
@@ -169,13 +169,13 @@ mat4_ortho :: proc(left, right, bottom, top, near, far: f32) -> matrix[4, 4]f32 
     }
 }
 
-mat4_ortho_fixed_height :: proc(height: f32, aspect: f32) -> matrix[4,4]f32 {
-    ui_width := height * aspect
-    left   := -ui_width * 0.5
-    right  :=  ui_width * 0.5
+mat4_ortho_fixed_height :: proc(height: f32, aspect: f32, near: f32 = 0, far: f32 = 1) -> matrix[4,4]f32 {
+    width := height * aspect
+    left   := -width * 0.5
+    right  :=  width * 0.5
     bottom := -height * 0.5
     top    :=  height * 0.5
-    return mat4_ortho(left, right, bottom, top, 0, 1)
+    return mat4_ortho(left, right, bottom, top, near, far)
 }
 
 // proj_ui := mat4_ui_ortho_fixed_height(1080, screen_width/screen_height)

@@ -27,13 +27,13 @@ TextureSampler :: struct {
 }
 
 create_sampler :: proc(desc: TextureSamplerDesc) -> TextureSampler {
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         return metal_create_sampler(desc)
     }
 }
 
 destroy_sampler :: proc(sampler: ^TextureSampler) {
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         metal_destroy_sampler(sampler)
     }
 }

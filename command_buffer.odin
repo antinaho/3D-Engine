@@ -46,7 +46,6 @@ destroy_command_buffer :: proc(cb: ^CommandBuffer) {
 // ===== Render Pass =====
 BeginPassCommand :: struct {
     name: string,
-    renderpass_descriptor: rawptr,
 }
 
 EndPassCommand :: struct {}
@@ -131,17 +130,15 @@ RenderPassMSAADesc :: struct {
 }
 
 Update_Renderpass_Desc :: struct {
-    renderpass_descriptor: rawptr,
     msaa_texture: Texture,
     depth_texture: Texture,
 }
 
 ///////////////////////////////////////
 
-cmd_begin_pass :: proc(cb: ^CommandBuffer, name: string, renderpass_descriptor: rawptr) {
+cmd_begin_pass :: proc(cb: ^CommandBuffer, name: string) {
     append(cb, BeginPassCommand{
         name = name,
-        renderpass_descriptor = renderpass_descriptor,
     })
 }
 

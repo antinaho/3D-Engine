@@ -153,22 +153,14 @@ Pipeline :: struct {
 
 // Create pipeline
 create_pipeline :: proc(desc: PipelineDesc) -> Pipeline {
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         return metal_create_pipeline(desc)
-    } else when RENDERER == .Vulkan {
-        return vulkan_create_pipeline(desc)
-    } else when RENDERER == .D3D12 {
-        return d3d12_create_pipeline(desc)
-    }
+    } 
 }
 
 // Free pipeline memory
 destroy_pipeline :: proc(pipeline: ^Pipeline) {
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         metal_destroy_pipeline(pipeline)
-    } else when RENDERER == .Vulkan {
-        vulkan_destroy_pipeline(pipeline)
-    } else when RENDERER == .D3D12 {
-        d3d12_destroy_pipeline(pipeline)
-    }
+    } 
 }

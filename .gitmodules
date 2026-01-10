@@ -1,0 +1,6 @@
+[submodule "pohja"]
+	path = pohja
+	url = https://github.com/antinaho/Pohja.git
+[submodule "huuru"]
+	path = huuru
+	url = https://github.com/antinaho/Huuru.git

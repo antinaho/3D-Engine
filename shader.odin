@@ -23,7 +23,7 @@ Shader :: struct {
 }
 
 compile_shader :: proc(desc: ShaderDesc) -> (Shader, bool) {
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         return metal_compile_shader(desc)
     }
 }

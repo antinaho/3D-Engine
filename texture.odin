@@ -14,10 +14,14 @@ TextureType :: enum {
     Texture2DMultisample,
 }
 
+TextureStorage :: enum {
+    Private,
+}
+
 TextureDesc :: struct {
     width: int,
     height: int,
-    //depth: int,
+    storage: TextureStorage,
     format: PixelFormat,
     usage: TextureUsage,
     type: TextureType,
@@ -37,21 +41,21 @@ TextureLoadDesc :: struct {
 
 // Load texture from file
 load_texture :: proc(desc: TextureLoadDesc) -> Texture {
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         return metal_load_texture(desc)
     }
 }
 
 // Create texture with TextureDesc
 create_texture :: proc(desc: TextureDesc) -> Texture {
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         return metal_create_texture(desc)
     }
 }
 
 // Free texture memory
 destroy_texture :: proc(texture: ^Texture) {
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         metal_destroy_texture(texture)
     }
 }

@@ -213,6 +213,8 @@ struct VertexOut {
 
 struct InstanceData {
     float4x4 model;
+    float2 texture_scale;
+    float2 texture_offset;
 };
 
 struct UniformData {
@@ -239,9 +241,7 @@ vertex VertexOut vertex_m(
     out.position = uni.projection * uni.view * world_pos;
     out.color = in.color;
 
-    float2 tex_scale = float2(1.0);
-    float2 tex_offset = float2(0.0);
-    out.uvs = in.uvs * tex_scale + tex_offset;
+    out.uvs = in.uvs * i.texture_scale + i.texture_offset;
     out.uvs.y = 1.0 - out.uvs.y;
     
     return out;

@@ -5,7 +5,8 @@ import NS "core:sys/darwin/Foundation"
 
 import "base:intrinsics"
 import "base:runtime"
-import "core:log"
+
+import "core:fmt"
 
 MacWindowAPI :: WindowAPI {
 	close = _mac_close_window,
@@ -16,6 +17,7 @@ MacPlatform :: struct {
 	window: ^NS.Window,
 }
 
+@(private="file")
 ns_app: ^NS.Application
 
 _mac_process_events :: proc() {
@@ -60,28 +62,24 @@ _mac_get_window_handle :: proc(w: ^Window) -> WindowHandle {
 	return cast(WindowHandle)platform.window
 }
 
-_mac_close_window :: proc(w: ^Window) {
-	platform := cast(^MacPlatform)w.platform
-	
+_mac_close_window :: proc(application_window: ^ApplicationWindow) {
+	platform := cast(^MacPlatform)application_window.window.platform
 	platform.window->close()
-
-	free(platform)
-	free(w)
 }
 
-window_create_mac :: proc(width, height: int, title: string, flags: WindowFlags) -> ^Window {
-	window := new(Window)
-	platform := new(MacPlatform)
+window_create_mac :: proc(application_window: ^ApplicationWindow, width, height: int, title: string, flags: WindowFlags) -> ^Window {
+	window := new(Window, application_window.window_allocator)
+	platform := new(MacPlatform, application_window.window_allocator)
 
 	ns_app = NS.Application.sharedApplication()
 	ns_app->setActivationPolicy(.Regular)
-
-	window.title = title
-	window.width = width
-	window.height = height
 	
 	platform.window = NS.Window_alloc()
 	platform.window->setReleasedWhenClosed(true)
+
+	application_window.width = width
+	application_window.height = height
+	application_window.title = title
 
 	rect := NS.Rect{
 		size = {NS.Float(width), NS.Float(height)},
@@ -96,7 +94,7 @@ window_create_mac :: proc(width, height: int, title: string, flags: WindowFlags)
 
 	if .MainWindow in flags {
 		platform.window->makeKeyAndOrderFront(nil)
-		platform.window->makeMainWindow()	
+		//platform.window->makeMainWindow()	
 	} else {
 		platform.window->makeKeyAndOrderFront(nil)
 	}
@@ -108,78 +106,78 @@ window_create_mac :: proc(width, height: int, title: string, flags: WindowFlags)
 
 		windowShouldClose :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_should_close(del.app_window, notification)
+			context = application.ctx
+			del.window_should_close(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowShouldClose:"), auto_cast windowShouldClose, "v@:@")
 		
 		windowWillClose :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
+			context = application.ctx
 			del.window_will_close(notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowWillClose:"), auto_cast windowWillClose, "v@:@")
 		
 		windowDidResize :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_did_resize(del.app_window, notification)
+			context = application.ctx
+			del.window_did_resize(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowDidResize:"), auto_cast windowDidResize, "v@:@")
 		
 		windowDidMiniaturize :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_did_miniaturize(del.app_window, notification)
+			context = application.ctx
+			del.window_did_miniaturize(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowDidMiniaturize:"), auto_cast windowDidMiniaturize, "v@:@")
 		
 		windowDidDeminiaturize :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_did_deminiaturize(del.app_window, notification)
+			context = application.ctx
+			del.window_did_deminiaturize(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowDidDeminiaturize:"), auto_cast windowDidDeminiaturize, "v@:@")
 
 		windowDidEnterFullScreen :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_did_enter_fullscreen(del.app_window, notification)
+			context = application.ctx
+			del.window_did_enter_fullscreen(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowDidEnterFullScreen:"), auto_cast windowDidEnterFullScreen, "v@:@")
 		
 		windowDidExitFullScreen :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_did_exit_fullscreen(del.app_window, notification)
+			context = application.ctx
+			del.window_did_exit_fullscreen(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowDidExitFullScreen:"), auto_cast windowDidExitFullScreen, "v@:@")
 
 		windowDidMove :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_did_move(del.app_window, notification)
+			context = application.ctx
+			del.window_did_move(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowDidMove:"), auto_cast windowDidMove, "v@:@")
 		
 		windowDidBecomeKey :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_did_become_key(del.app_window, notification)
+			context = application.ctx
+			del.window_did_become_key(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowDidBecomeKey:"), auto_cast windowDidBecomeKey, "v@:@")
 		
 		windowDidResignKey :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_did_resign_key(del.app_window, notification)
+			context = application.ctx
+			del.window_did_resign_key(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowDidResignKey:"), auto_cast windowDidResignKey, "v@:@")
 
 		windowDidChangeOcclusionState :: proc "c" (self: NS.id, cmd: NS.SEL, notification: ^NS.Notification) {
 			del := cast(^WindowEventsAPI)NS.object_getIndexedIvars(self)
-			context = del.ctx
-			del.window_did_change_occlusion_state(del.app_window, notification)
+			context = application.ctx
+			del.window_did_change_occlusion_state(del.application_window, notification)
 		}
 		NS.class_addMethod(WindowDelegate, intrinsics.objc_find_selector("windowDidChangeOcclusionState:"), auto_cast windowDidChangeOcclusionState, "v@:@")
 
@@ -190,7 +188,7 @@ window_create_mac :: proc(width, height: int, title: string, flags: WindowFlags)
 
 	del_internal := cast(^WindowEventsAPI)NS.object_getIndexedIvars(del)
 	del_internal^ = {
-		app_window = window,
+		application_window = application_window,
 		window_should_close = window_should_close,
 		window_will_close = window_will_close,
 		window_did_resize = window_did_resize,
@@ -209,7 +207,7 @@ window_create_mac :: proc(width, height: int, title: string, flags: WindowFlags)
 	platform.window->setDelegate(window_delegate)
 
 	window.api = MacWindowAPI
-	window.platform = cast(Platform)platform
+	window.platform = cast(_Platform)platform
 
 	ns_app->activate()
 	return window
@@ -221,22 +219,22 @@ window_create_mac :: proc(width, height: int, title: string, flags: WindowFlags)
 WindowDelegate: ^intrinsics.objc_class
 		
 WindowEventsAPI :: struct {
-	using app_window: ^Window,
-	window_should_close		          : proc(window: ^Window, notification: ^NS.Notification),
+	application_window				  : ^ApplicationWindow,
+	window_should_close		          : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
 	window_will_close                 : proc(notification: ^NS.Notification),
-	window_will_start_live_resize     : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_end_live_resize        : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_resize                 : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_miniaturize            : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_deminiaturize          : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_enter_fullscreen       : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_exit_fullscreen        : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_move               	  : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_become_key             : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_resign_key             : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_become_main            : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_resign_main            : proc(window: ^Window, notification: ^NS.Notification),
-	window_did_change_occlusion_state : proc(window: ^Window, notification: ^NS.Notification),
+	window_will_start_live_resize     : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_end_live_resize        : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_resize                 : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_miniaturize            : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_deminiaturize          : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_enter_fullscreen       : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_exit_fullscreen        : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_move               	  : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_become_key             : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_resign_key             : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_become_main            : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_resign_main            : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
+	window_did_change_occlusion_state : proc(application_window: ^ApplicationWindow, notification: ^NS.Notification),
 }
 
 code_to_mouse_button := [64]InputMouseButton {
@@ -405,80 +403,76 @@ GameWindowDelegate :: struct {
 // Closing window
 
 //User requested close
-window_should_close :: proc (window: ^Window, notification: ^NS.Notification) {
-    input_new_event(WindowEventCloseRequested{ window })
+window_should_close :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+    input_new_event(WindowEventCloseRequested{ application_window })
 }
 
 window_will_close :: proc (notification: ^NS.Notification) { }
 
 ///////////////////
 // Resizing window
-window_did_resize :: proc (window: ^Window, notification: ^NS.Notification) {
-	platform := cast(^MacPlatform)window.platform
+window_did_resize :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+	platform := cast(^MacPlatform)application_window.window.platform
 	frame := platform.window->frame()
-
-	window.width = int(frame.width)
-	window.height = int(frame.height)
-
-	input_new_event(WindowResizeEvent{ window, int(frame.width), int(frame.height) })
+	input_new_event(WindowResizeEvent{ application_window, int(frame.width), int(frame.height) })
 }
 
 ///////////////////////
 // Minimizing window
 
-window_did_miniaturize :: proc (window: ^Window, notification: ^NS.Notification) {
-	input_new_event(WindowMinimizeStartEvent{ window })
+window_did_miniaturize :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+	input_new_event(WindowMinimizeStartEvent{ application_window })
 }
 
-window_did_deminiaturize :: proc (window: ^Window, notification: ^NS.Notification) {
-	input_new_event(WindowMinimizeEndEvent{ window })
+window_did_deminiaturize :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+	input_new_event(WindowMinimizeEndEvent{ application_window })
 }
 
 ///////////////////////
 // Fullscreen window
 
-window_did_enter_fullscreen :: proc (window: ^Window, notification: ^NS.Notification) {
-	input_new_event(WindowEnterFullscreenEvent{ window })
+window_did_enter_fullscreen :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+	input_new_event(WindowEnterFullscreenEvent{ application_window })
 }
 
-window_did_exit_fullscreen :: proc (window: ^Window, notification: ^NS.Notification) {
-	input_new_event(WindowExitFullscreenEvent{ window })
+window_did_exit_fullscreen :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+	input_new_event(WindowExitFullscreenEvent{ application_window })
 }
 
 ///////////////////////
 // Moving window
 
-window_did_move :: proc (window: ^Window, notification: ^NS.Notification) {
-	platform := cast(^MacPlatform)window.platform
+window_did_move :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+	platform := cast(^MacPlatform)application_window.window.platform
     frame := platform.window->frame()
 	x := frame.x
 	y := frame.y
 
-	input_new_event(WindowMoveEvent{ window, int(x), int(y) })
+	input_new_event(WindowMoveEvent{ application_window, int(x), int(y) })
 }
 
 ///////////////////////
 // Focusing window
 
-window_did_become_key :: proc (window: ^Window, notification: ^NS.Notification) {
-	input_new_event(WindowDidBecomeKey{ window })
+window_did_become_key :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+	input_new_event(WindowDidBecomeKey{ application_window })
 }
 
-window_did_resign_key :: proc (window: ^Window, notification: ^NS.Notification) {
-	input_new_event(WindowDidResignKey{ window })
+window_did_resign_key :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+	input_new_event(WindowDidResignKey{ application_window })
 }
 
 //////////////////////
 // Occlusion state
 
-window_did_change_occlusion_state :: proc (window: ^Window, notification: ^NS.Notification) {
-	platform := cast(^MacPlatform)window.platform
+window_did_change_occlusion_state :: proc (application_window: ^ApplicationWindow, notification: ^NS.Notification) {
+	platform := cast(^MacPlatform)application_window.window.platform
 
 	visible := platform.window->occlusionStateVisible()
 
 	if visible {
-		input_new_event(WindowBecameVisibleEvent{ window })
+		input_new_event(WindowBecameVisibleEvent{ application_window })
 	} else if !visible {
-		input_new_event(WindowBecameHiddenEvent{ window })
+		input_new_event(WindowBecameHiddenEvent{ application_window })
 	}
 }

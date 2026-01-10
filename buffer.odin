@@ -25,7 +25,7 @@ init_buffer_with_size :: proc(
     access: BufferAccess,
 ) -> Buffer {
     assert(size > 0, "Trying to create zero / negative size buffer")
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         return metal_init_buffer(size, usage, access)
     }
 }
@@ -34,7 +34,7 @@ init_buffer_with_size :: proc(
 fill_buffer :: proc(buffer: ^Buffer, data: rawptr, size: int, offset: int) {
     assert(offset + size <= buffer.size, "Buffer overflow")
     
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         metal_fill_buffer(buffer, data, size, offset)
     }
 }
@@ -46,7 +46,7 @@ fill_buffer_slice :: proc(buffer: ^Buffer, data: $T/[]$E, offset: int) {
 
 // Release buffer and free resources
 release_buffer :: proc(buffer: ^Buffer) {
-    when RENDERER == .Metal {
+    when RENDERER_KIND == .Metal {
         metal_release_buffer(buffer)
     }
     
