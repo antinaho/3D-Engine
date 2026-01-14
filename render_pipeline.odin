@@ -118,9 +118,7 @@ ShaderStage :: enum {
 }
 
 PipelineDesc :: struct {
-    // Shaders
-    vertex_shader: Shader,
-    fragment_shader: Shader,
+
     
     // Vertex input
     vertex_attributes: []VertexAttribute,
@@ -149,18 +147,4 @@ PipelineDesc :: struct {
 Pipeline :: struct {
     handle: rawptr,
     desc: PipelineDesc,
-}
-
-// Create pipeline
-create_pipeline :: proc(desc: PipelineDesc) -> Pipeline {
-    when RENDERER_KIND == .Metal {
-        return metal_create_pipeline(desc)
-    } 
-}
-
-// Free pipeline memory
-destroy_pipeline :: proc(pipeline: ^Pipeline) {
-    when RENDERER_KIND == .Metal {
-        metal_destroy_pipeline(pipeline)
-    } 
 }
