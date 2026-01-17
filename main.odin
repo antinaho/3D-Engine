@@ -114,6 +114,3 @@ application_request_shutdown :: #force_inline proc() {
 	application.shutdown_requested = true
 }
 
-delta_time :: #force_inline proc() -> f32 {
-	return application.delta_time
-}

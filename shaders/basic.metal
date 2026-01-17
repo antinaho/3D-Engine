@@ -22,7 +22,8 @@ vertex VSOut basic_vertex(Sprite_Vertex in [[stage_in]],
 {
     VSOut out;
     out.position = uniforms.view_projection * float4(in.position, 1.0);
-    out.uv = 1.0 - in.uv;
+    out.uv   = in.uv;
+    out.uv.y = 1.0 - out.uv.y;
     out.color = float4(in.color) / 255.0;
     return out;
 }
