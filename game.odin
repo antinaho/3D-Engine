@@ -100,6 +100,24 @@ EntityType :: enum {
     Quad,
     Triangle,
 }
+//
+
+Vector3 :: [3]f32
+
+import p "pohja"
+import r "huuru"
+
+import "core:math/rand"
+import "core:time"
+
+Vec2i :: [2]int
+
+
+Material :: struct {
+    texture:  r.Texture_ID,
+    pipeline: r.Pipeline_ID, 
+}
+
 
 Transform :: struct {
     position: Vector3,
@@ -107,13 +125,16 @@ Transform :: struct {
     scale:    Vector3,
 }
 
-//
+Entity_ID :: distinct uint
 
-import p "pohja"
-import r "huuru"
+Entity :: struct {
+    id:              Entity_ID,
+    using transform: Transform,
+}
 
-import "core:math/rand"
-import "core:time"
+Camera_Ent :: struct {
+    using _: Entity,
+}
 
 main :: proc() {
     
@@ -129,29 +150,33 @@ main :: proc() {
     context.logger = log.create_console_logger()
 	defer log.destroy_console_logger(context.logger)
 
-    p.init(1)
+    p.platform_init(1)
+    window_id := p.open_window(1280, 720, "Hellope")
 
-    id := p.open_window(p.Window_Description {
-        flags = {.MainWindow, .CenterOnOpen},
-        width = 1280,
-        height = 920,
-        title = "Hellope",
-    })
+    get_size: proc() -> [2]int
 
     r.init(1)
     r_id := r.init_renderer(
-        r.Window_Provider{
-            window_id = rawptr(uintptr(id)),
-            get_size = proc(id: rawptr) -> [2]int {
-                wid := p.Window_ID(uintptr(id))
-                return p.PLATFORM_API.get_window_size(wid)
+        r.Window_Provider {
+            data = rawptr(uintptr(window_id)),
+            get_size = proc(data: rawptr) -> Vec2i {
+                id := p.Window_ID(uintptr(data))
+                return p.get_window_size(id)
             },
-            get_native_handle = proc(id: rawptr) -> rawptr {
-                return rawptr(p.get_native_window_handle(p.Window_ID(uintptr(id))))
+            get_native_handle = proc(data: rawptr) -> rawptr {
+                id := p.Window_ID(uintptr(data))
+                return p.get_window_handle(id)
             },
-            is_visible = proc(id: rawptr) -> bool {return true},
-            is_minimized =  proc(window_id: rawptr) -> bool { return false },
-        })
+            is_minimized = proc(data: rawptr) -> bool {
+                id := p.Window_ID(uintptr(data))
+                return p.is_window_minimized(id)
+            },
+            is_visible = proc(data: rawptr) -> bool {
+                id := p.Window_ID(uintptr(data))
+                return p.is_window_visible(id)
+            }
+        }
+    )
 
     pipeline := r.create_pipeline(r_id, r.Pipeline_Desc{
         type = r.Pipeline_Desc_Metal{
@@ -166,30 +191,29 @@ main :: proc() {
         },
         attributes = {
             r.Vertex_Attribute{ format = .Float2, offset = offset_of(r.Sprite_Vertex, position), binding = 0 },
-            r.Vertex_Attribute{ format = .Float2, offset = offset_of(r.Sprite_Vertex, uv), binding = 0 },
-            r.Vertex_Attribute{ format = .UByte4, offset = offset_of(r.Sprite_Vertex, color), binding = 0 },
+            r.Vertex_Attribute{ format = .Float2, offset = offset_of(r.Sprite_Vertex, uv),       binding = 0 },
+            r.Vertex_Attribute{ format = .UByte4, offset = offset_of(r.Sprite_Vertex, color),    binding = 0 },
         },
         blend = r.OpaqueBlend,
     })
 
-    pipeline_2 := r.create_pipeline(r_id, r.Pipeline_Desc{
-        type = r.Pipeline_Desc_Metal{
-            vertex_entry   = "font_vertex",
-            fragment_entry = "font_fragment",
-        },
-        layouts = {
-            r.Vertex_Layout{
-                stride    = size_of(r.Sprite_Vertex),
-                step_rate = .PerVertex,
-            },
-        },
-        attributes = {
-            r.Vertex_Attribute{ format = .Float2, offset = offset_of(r.Sprite_Vertex, position), binding = 0 },
-            r.Vertex_Attribute{ format = .Float2, offset = offset_of(r.Sprite_Vertex, uv), binding = 0 },
-            r.Vertex_Attribute{ format = .UByte4, offset = offset_of(r.Sprite_Vertex, color), binding = 0 },
-        },
-        blend = r.OpaqueBlend,
+    bg_tex_data, bg_w, bg_h := r.load_tex("textures/Free/Background/Blue.png")
+    bg_tex_id := r.create_texture(r_id, r.Texture_Desc {
+        data = bg_tex_data,
+        width = bg_w,
+        height = bg_h,
+        format = .RGBA8,
     })
+
+    pixel_sampler := r.create_sampler(r_id, r.Sampler_Desc {
+        mag_filter = .Nearest,
+        min_filter = .Nearest,
+        wrap_s = .Repeat,
+        wrap_t = .Repeat,
+    })
+
+
+
 
     tex_data, w, h := r.load_tex("textures/face.jpg")
     t_id := r.create_texture(r_id, r.Texture_Desc {
@@ -227,13 +251,14 @@ main :: proc() {
     previous_time := time.tick_now()
     runtime: f32
 
-    for !p.platform_should_close() {
-        p.platform_update()
 
-        r.renderer.render_command_c = 0
+    for p.platform_update() {
+        r.clear_commands()
 
-        view := mat4_view(camera.position, camera.position + r.VECTOR3_FORWARD, r.VECTOR3_UP)
-        proj := mat4_ortho_fixed_height(camera.zoom, camera.aspect_ratio)
+        update_camera(&camera)
+
+        view := r.mat4_view(camera.position, camera.position + r.VECTOR3_FORWARD, r.VECTOR3_UP)
+        proj := r.mat4_ortho_fixed_height(camera.zoom, camera.aspect_ratio)
         uniforms := r.Uniforms{ view_projection = proj * view }
         r.push_buffer(r_id, uniform_buffer, &uniforms, 0, size_of(r.Uniforms), .Dynamic)
 
@@ -255,32 +280,15 @@ main :: proc() {
             min = {0, 0},
             max = {1, 1}
         }
-        // Faces
-        delta_time := f32(time.duration_seconds(time.tick_since(previous_time)))
-        runtime += delta_time
-        previous_time = time.tick_now()
 
-
-        for x := -600; x <= 600; x += 100 {
-            for y := -500; y <= 500; y += 100 {
-                
-                last_rot_p.z += 0.00006
-                last_rot_n.z -= 0.0001
-                rotation := last_rot_n if (x / 100 + y / 100) % 2 == 0 else last_rot_p
-
-                pulse := 1.0 + 0.39 * math.sin_f32(runtime * 3 + f32(x + y) * 0.011)
-                scale_factor := 64.0 * pulse
-
-                phase := runtime * 1.5 + f32(x) * 0.05 + f32(y) * 0.02
-                offset_y := 100 * math.sin_f32(phase)
-                offset_x := 20 * math.sin_f32(phase * 1.3 + 1.4)
-
+        for x in -5..=5 {
+            for y in -5..=5 {
                 r.draw_batched(sprite_batch, r.Draw_Batched{
-                    texture  = t_id,
-                    position = {f32(x) + offset_x, f32(y) + offset_y, 0},
-                    rotation = rotation,
+                    texture  = bg_tex_id,
+                    position = {f32(x) * 64 , f32(y) * 64, 0},
+                    rotation = {0, 0, 0},
                     uv_rect = full_uv,
-                    scale    = {scale_factor, scale_factor, 1},
+                    scale    = {64, 64, 1},
                     color    = {255, 255, 255, 255},
                 })
             }
@@ -305,6 +313,28 @@ main :: proc() {
     }
 
     p.cleanup()
+}
+
+
+ns_to_f32 :: proc(t: i64) -> f32 {
+    return f32(t) / 1_000_000_000
+}
+
+update_camera :: proc(camera: ^r.Camera) {
+    movement_speed: f32 = 400
+    if p.input_key_is_held(.A) {
+        camera.position.x -= ns_to_f32(p.get_deltatime_ns()) * movement_speed
+    }
+    if p.input_key_is_held(.D) {
+        camera.position.x += ns_to_f32(p.get_deltatime_ns()) * movement_speed
+    }
+
+    if p.input_key_is_held(.W) {
+        camera.position.y += ns_to_f32(p.get_deltatime_ns()) * movement_speed
+    }
+    if p.input_key_is_held(.S) {
+        camera.position.y -= ns_to_f32(p.get_deltatime_ns()) * movement_speed
+    }
 }
 
 
