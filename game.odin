@@ -59,47 +59,13 @@ main :: proc() {
             is_visible = proc(data: rawptr) -> bool {
                 id := p.Window_ID(uintptr(data))
                 return p.is_window_visible(id)
-            }
+            },
+            sample_count = 1
         }
     )
 
-    pipeline_opaque := r.create_pipeline(r_id, r.Pipeline_Desc{
-        type = r.Pipeline_Desc_Metal{
-            vertex_entry   = "basic_vertex",
-            fragment_entry = "basic_fragment",
-        },
-        layouts = {
-            r.Vertex_Layout{
-                stride    = size_of(r.Sprite_Vertex),
-                step_rate = .PerVertex,
-            },
-        },
-        attributes = {
-            r.Vertex_Attribute{ format = .Float2, offset = offset_of(r.Sprite_Vertex, position), binding = 0 },
-            r.Vertex_Attribute{ format = .Float2, offset = offset_of(r.Sprite_Vertex, uv),       binding = 0 },
-            r.Vertex_Attribute{ format = .UByte4, offset = offset_of(r.Sprite_Vertex, color),    binding = 0 },
-        },
-        blend = r.OpaqueBlend,
-    })
-
-    pipeline_alpha_blend := r.create_pipeline(r_id, r.Pipeline_Desc{
-        type = r.Pipeline_Desc_Metal{
-            vertex_entry   = "basic_vertex",
-            fragment_entry = "basic_fragment",
-        },
-        layouts = {
-            r.Vertex_Layout{
-                stride    = size_of(r.Sprite_Vertex),
-                step_rate = .PerVertex,
-            },
-        },
-        attributes = {
-            r.Vertex_Attribute{ format = .Float2, offset = offset_of(r.Sprite_Vertex, position), binding = 0 },
-            r.Vertex_Attribute{ format = .Float2, offset = offset_of(r.Sprite_Vertex, uv),       binding = 0 },
-            r.Vertex_Attribute{ format = .UByte4, offset = offset_of(r.Sprite_Vertex, color),    binding = 0 },
-        },
-        blend = r.AlphaBlend,
-    })
+    shape_pipeline := r.shape_pipeline(r_id)
+    r.shape_batcher_init(r_id, context.allocator)
 
     bg_tex_data, bg_w, bg_h := r.load_tex("textures/Free/Background/Blue.png")
     bg_tex_id := r.create_texture(r_id, r.Texture_Desc {
@@ -137,14 +103,12 @@ main :: proc() {
 
 
     pixel_sampler := r.create_sampler(r_id, r.Sampler_Desc {
-        mag_filter = .Nearest,
-        min_filter = .Nearest,
-        wrap_s = .Repeat,
-        wrap_t = .Repeat,
+        mag_filter = .Linear,
+        min_filter = .Linear,
+        wrap_s = .ClampToEdge,
+        wrap_t = .ClampToEdge,
     })
     
-    sprite_batch := r.sprite_batch_init(r_id, 0, 0)
-
     uniform_buffer := r.create_buffer_zeros(
         r_id,
         size_of(r.Uniforms),
@@ -152,10 +116,11 @@ main :: proc() {
         .Dynamic,
     )
 
+    s := p.get_window_size(window_id)
     camera := r.Camera {
         position = {0, 0, 1},
-        aspect_ratio = 16.0 / 9.0,
-        zoom = 920,
+        aspect_ratio = f32(s.x) / f32(s.y),
+        zoom = 900,
     }
 
     f : int = 0
@@ -231,7 +196,9 @@ main :: proc() {
     opacity: f32 = 1.0
     for p.platform_update() {
         r.clear_commands()
-        sprite_batch.buffer_offset = 0
+        
+        r.shape_batch.instance_offset = 0
+        r.shape_batch.instance_count = 0
 
         update_camera(&camera)
 
@@ -243,7 +210,8 @@ main :: proc() {
 
         if !lost {
             update_player(&player)
-            update_rock(&rock, &rock_vel)
+            //update_rock(&rock, &rock_vel)
+            rock.rotation.z += ns_to_f32(p.get_deltatime_ns()) * 0.5
             rock_vel.xy *= 1 + (ns_to_f32(p.get_deltatime_ns()) * 0.11)
         }
         
@@ -256,7 +224,7 @@ main :: proc() {
 
         r.cmd_begin_frame({r_id})
 
-        r.cmd_bind_pipeline({r_id, pipeline_opaque})
+        r.cmd_bind_pipeline({r_id, shape_pipeline})
 
         r.cmd_bind_vertex_buffer(r.Render_Command_Bind_Vertex_Buffer{
             id = r_id,
@@ -273,15 +241,21 @@ main :: proc() {
         }
 
         for x in -5..=5 {
-            for y in -5..=5 {
-                r.draw_batched(sprite_batch, r.Draw_Batched{
-                    texture  = bg_tex_id,
-                    position = {f32(x) * 64 , f32(y) * 64, 0},
-                    rotation = {0, 0, 0},
-                    uv_rect  = full_uv,
-                    scale    = {64, 64, 1},
-                    color    = {255, 255, 255, 255},
-                })
+            for y in -5..=5 {                
+                r.draw_rect(
+                    position = {f32(x) * 64 , f32(y) * 64},
+                    rotation = 0,
+                    size     = {64, 64},
+                    color    = {255, 255, 255, 255}
+                )
+                // r.draw_batched(sprite_batch, r.Draw_Batched{
+                //     texture  = bg_tex_id,
+                //     position = {f32(x) * 64 , f32(y) * 64, 0},
+                //     rotation = {0, 0, 0},
+                //     uv_rect  = full_uv,
+                //     scale    = {64, 64, 1},
+                //     color    = {255, 255, 255, 255},
+                // })
             }
         }
 
@@ -291,67 +265,65 @@ main :: proc() {
             max = {(13 * 16) / 352.0, 32 / 176.0}
         }
 
-        for x in -6..=6 {
-            r.draw_batched(sprite_batch, r.Draw_Batched{
-                texture  = terrain_tex_id,
-                position = {64 * f32(x), -64 * 6, 0},
-                rotation = {0, 0, 0},
-                uv_rect  = terrain_block_uv,
-                scale    = {64, 64, 1},
-                color    = {255, 255, 255, 255},
-            })
+        // for x in -6..=6 {
+        //     r.draw_batched(sprite_batch, r.Draw_Batched{
+        //         texture  = terrain_tex_id,
+        //         position = {64 * f32(x), -64 * 6, 0},
+        //         rotation = {0, 0, 0},
+        //         uv_rect  = terrain_block_uv,
+        //         scale    = {64, 64, 1},
+        //         color    = {255, 255, 255, 255},
+        //     })
 
-            r.draw_batched(sprite_batch, r.Draw_Batched{
-                texture  = terrain_tex_id,
-                position = {64 * f32(x), 64 * 6, 0},
-                rotation = {0, 0, 0},
-                uv_rect  = terrain_block_uv,
-                scale    = {64, 64, 1},
-                color    = {255, 255, 255, 255},
-            })
-        }
+        //     r.draw_batched(sprite_batch, r.Draw_Batched{
+        //         texture  = terrain_tex_id,
+        //         position = {64 * f32(x), 64 * 6, 0},
+        //         rotation = {0, 0, 0},
+        //         uv_rect  = terrain_block_uv,
+        //         scale    = {64, 64, 1},
+        //         color    = {255, 255, 255, 255},
+        //     })
+        // }
 
-        for y in -6..=6 {
-            r.draw_batched(sprite_batch, r.Draw_Batched{
-                texture  = terrain_tex_id,
-                position = {-64 * 6, 64 * f32(y), 0},
-                rotation = {0, 0, 0},
-                uv_rect  = terrain_block_uv,
-                scale    = {64, 64, 1},
-                color    = {255, 255, 255, 255},
-            })
+        // for y in -6..=6 {
+        //     r.draw_batched(sprite_batch, r.Draw_Batched{
+        //         texture  = terrain_tex_id,
+        //         position = {-64 * 6, 64 * f32(y), 0},
+        //         rotation = {0, 0, 0},
+        //         uv_rect  = terrain_block_uv,
+        //         scale    = {64, 64, 1},
+        //         color    = {255, 255, 255, 255},
+        //     })
 
-            r.draw_batched(sprite_batch, r.Draw_Batched{
-                texture  = terrain_tex_id,
-                position = {64 * 6, 64 * f32(y), 0},
-                rotation = {0, 0, 0},
-                uv_rect  = terrain_block_uv,
-                scale    = {64, 64, 1},
-                color    = {255, 255, 255, 255},
-            })
-        }
+        //     r.draw_batched(sprite_batch, r.Draw_Batched{
+        //         texture  = terrain_tex_id,
+        //         position = {64 * 6, 64 * f32(y), 0},
+        //         rotation = {0, 0, 0},
+        //         uv_rect  = terrain_block_uv,
+        //         scale    = {64, 64, 1},
+        //         color    = {255, 255, 255, 255},
+        //     })
+        // }
 
+        // r.draw_batched(sprite_batch, r.Draw_Batched{
+        //     texture  = enemy_tex_id,
+        //     position = rock.position,
+        //     rotation = rock.rotation,
+        //     uv_rect  = full_uv,
+        //     scale    = rock.scale,
+        //     color    = {255, 255, 255, 255},
+        // })
 
-
-        r.cmd_bind_pipeline({r_id, pipeline_alpha_blend})
-
-        r.draw_batched(sprite_batch, r.Draw_Batched{
-            texture  = enemy_tex_id,
-            position = rock.position,
-            uv_rect  = full_uv,
-            scale    = rock.scale,
-            color    = {255, 255, 255, 255},
-        })
-
-        r.draw_batched(sprite_batch, r.Draw_Batched{
-            texture  = dude_tex_id,
-            position = player.position,
-            uv_rect  = full_uv,
-            scale    = player.scale,
-            color    = {255, 255, 255, 255},
-        })
+        // r.draw_batched(sprite_batch, r.Draw_Batched{
+        //     texture  = dude_tex_id,
+        //     position = player.position,
+        //     uv_rect  = full_uv,
+        //     scale    = player.scale,
+        //     color    = {255, 255, 255, 255},
+        // })
+        r.flush_shapes_batch()
         
-        r.flush(sprite_batch)
+        
         r.cmd_end_frame({r_id})
         r.present()
         
