@@ -22,6 +22,21 @@ Transform :: struct {
     scale:    Vec3,
 }
 
+Entity :: struct {
+    using transform: Transform,
+    color: r.Color,
+}
+
+Background_Tile :: struct {
+    using _ : Entity,
+}
+
+Shape :: struct {
+    using _ : Entity,
+    kind: r.Shape_Kind,
+    ratio: f32,
+}
+
 main :: proc() {
     
     // --
@@ -66,48 +81,9 @@ main :: proc() {
 
     shape_pipeline := r.shape_pipeline(r_id)
     r.shape_batcher_init(r_id, context.allocator)
-
-    bg_tex_data, bg_w, bg_h := r.load_tex("textures/Free/Background/Blue.png")
-    bg_tex_id := r.create_texture(r_id, r.Texture_Desc {
-        data   = bg_tex_data,
-        width  = bg_w,
-        height = bg_h,
-        format = .RGBA8,
-    })
-
-    terrain_tex_data, terrain_w, terrain_h := r.load_tex("textures/Free/Terrain/Terrain (16x16).png")
-    terrain_tex_id := r.create_texture(r_id, r.Texture_Desc {
-        data   = terrain_tex_data,
-        width  = terrain_w,
-        height = terrain_h,
-        format = .RGBA8,
-    })
-
-    dude_tex_data, dude_w, dude_h := r.load_tex("textures/Free/Traps/Sand Mud Ice/Mud Particle.png")
-    dude_tex_id := r.create_texture(r_id, r.Texture_Desc {
-        data   = dude_tex_data,
-        width  = dude_w,
-        height = dude_h,
-        format = .RGBA8,
-    })
-
-    enemy_tex_data, enemy_w, enemy_h := r.load_tex("textures/Free/Traps/Rock Head/Idle.png")
-    enemy_tex_id := r.create_texture(r_id, r.Texture_Desc {
-        data   = enemy_tex_data,
-        width  = enemy_w,
-        height = enemy_h,
-        format = .RGBA8,
-    })
-
     
-
-
-    pixel_sampler := r.create_sampler(r_id, r.Sampler_Desc {
-        mag_filter = .Linear,
-        min_filter = .Linear,
-        wrap_s = .ClampToEdge,
-        wrap_t = .ClampToEdge,
-    })
+    pipeline := r.shape_pipeline(r_id)
+    sampler := r.shape_sampler(r_id)
     
     uniform_buffer := r.create_buffer_zeros(
         r_id,
@@ -120,222 +96,170 @@ main :: proc() {
     camera := r.Camera {
         position = {0, 0, 1},
         aspect_ratio = f32(s.x) / f32(s.y),
-        zoom = 900,
+        zoom = 144,
     }
 
-    f : int = 0
-    last_rot_p: Vec3
-    last_rot_n: Vec3
-    previous_time := time.tick_now()
-    runtime: f32
-
-    
-    rock_vel := random_unit_vector2() * 500
-
-    rock := Transform {
-        position = {0, 200, 0.1},
-        scale = {32 * 4, 32 * 4, 1}
+    Shape :: struct {
+        using _ : Transform,
+        kind: uint,
+        ratio: f32,
+        alive: bool,
+        vel: r.Vec2,
+        color: r.Color,
+        current: f32,
+        delay: f32,
     }
 
-    player_vel := Vector2 {0, 0}
-    player := Transform {
-        position = {0, -100, 0.1},
-        scale = {32 * 4, 32 * 4, 1}
+    shapes := make([]Shape, 50_000)
+
+    for &s in shapes {
+        s.kind = rand.uint_range(0, 6)
+        s.ratio = rand.float32_range(0.01, 1)
+        s.vel   = random_unit_vector2() * rand.float32_range(50, 175)
+        s.color = {u8(rand.uint32_range(0, 255)), u8(rand.uint32_range(0, 255)), u8(rand.uint32_range(0, 255)), 255}
+        s.delay = rand.float32_range(0, 6)
+        s.current = s.delay
     }
 
-    update_rock :: proc(t: ^Transform, vel: ^Vector2) {
-        t.position.xy += ns_to_f32(p.get_deltatime_ns()) * vel^
-
-        if t.position.x < -385 + t.scale.x * 0.5 || t.position.x > 385 - t.scale.x * 0.5 {
-            t.position.x = clamp(t.position.x, -385 + t.scale.x * 0.5, 385 - t.scale.x * 0.5)
-            vel.x *= -1
-        }
-    
-        if t.position.y < -385 + t.scale.y * 0.5 || t.position.y > 385 - t.scale.y * 0.5 {
-            t.position.y = clamp(t.position.y, -385 + t.scale.y * 0.5, 385 - t.scale.y * 0.5)
-            vel.y *= -1
-        }
-    }
-
-    update_player :: proc(t: ^Transform) {
-        player_ms: f32 = 425
-        if p.input_key_is_held(.A) {
-            t.position.x -= ns_to_f32(p.get_deltatime_ns()) * player_ms
-        }
-        if p.input_key_is_held(.D) {
-            t.position.x += ns_to_f32(p.get_deltatime_ns()) * player_ms
-        }
-    
-        if p.input_key_is_held(.W) {
-            t.position.y += ns_to_f32(p.get_deltatime_ns()) * player_ms
-        }
-        if p.input_key_is_held(.S) {
-            t.position.y -= ns_to_f32(p.get_deltatime_ns()) * player_ms
-        }
-
-        t.position.x = clamp(t.position.x, -385 + t.scale.x * 0.5, 385 - t.scale.x * 0.5)
-        t.position.y = clamp(t.position.y, -385 + t.scale.y * 0.5, 385 - t.scale.y * 0.5)
-    }
-
-    inside :: proc(t1, t2: ^Transform) -> bool {
-        right_p := t1.position + t1.scale.x * 0.25
-        left_p :=  t1.position - t1.scale.x * 0.25
-        right_r := t2.position + t2.scale.x * 0.4
-        left_r :=  t2.position - t2.scale.x * 0.4
-
-        up_p :=   t1.position + t1.scale.y * 0.25
-        down_p := t1.position - t1.scale.y * 0.25
-        up_r :=   t2.position + t2.scale.y * 0.4
-        down_r := t2.position - t2.scale.y * 0.4
-
-        return right_p.x > left_r.x && left_p.x < right_r.x &&
-               up_p.y > down_r.y && down_p.y < up_r.y
-    }
-
-    lost := false
-    opacity: f32 = 1.0
-    for p.platform_update() {
-        r.clear_commands()
+    cols := 80
+    start := -32 * (cols/2)
+    cell_size := 32
+    bg_tiles: [80 * 80]Background_Tile
+    for &tile, i in bg_tiles {
+        row := i / cols
+        col := i % cols
+        x := start + col * cell_size
+        y := start + row * cell_size
+        is_even := (row + col) % 2 == 0
         
-        r.shape_batch.instance_offset = 0
-        r.shape_batch.instance_count = 0
+        tile.color = r.Color {80, 80, 80, 255} if is_even else r.Color {120, 120, 120, 255}
+        tile.position = {f32(x), f32(y), 0} 
+    }
+    
+    f : int = 0
+
+    for p.platform_update() {
+        f += 1
+        r.clear_commands()
+        r.shape_batch_begin_frame()
 
         update_camera(&camera)
 
-        if inside(&player, &rock) {
-            player_vel = 0
-            rock_vel = 0
-            lost = true
-        }
 
-        if !lost {
-            update_player(&player)
-            //update_rock(&rock, &rock_vel)
-            rock.rotation.z += ns_to_f32(p.get_deltatime_ns()) * 0.5
-            rock_vel.xy *= 1 + (ns_to_f32(p.get_deltatime_ns()) * 0.11)
-        }
         
+        r.cmd_begin_frame({r_id})
 
         view := r.mat4_view(camera.position, camera.position + r.VECTOR3_FORWARD, r.VECTOR3_UP)
         proj := r.mat4_ortho_fixed_height(camera.zoom, camera.aspect_ratio)
         uniforms := r.Uniforms{ view_projection = proj * view }
         r.push_buffer(r_id, uniform_buffer, &uniforms, 0, size_of(r.Uniforms), .Dynamic)
-
-
-        r.cmd_begin_frame({r_id})
-
+        
+        
         r.cmd_bind_pipeline({r_id, shape_pipeline})
+        r.cmd_bind_sampler({r_id, sampler, 0})
 
         r.cmd_bind_vertex_buffer(r.Render_Command_Bind_Vertex_Buffer{
             id = r_id,
             buffer_id = uniform_buffer,
-            index = 1,
+            index = 2,
             offset = 0
         })
 
-        r.cmd_bind_sampler({id =r_id, sampler =pixel_sampler, slot=0})
+        //r.draw_rect({0, 0}, 0, {16, 16}, {255, 100, 100, 255})      // Red rectangle
+        //r.draw_circle({-60, 0}, 16, {100, 255, 100, 255})             // Green circle
+        //r.draw_triangle({0, 50}, 0, 60, {100, 100, 255, 255})           // Blue triangle
+        //r.draw_donut({0, -20}, 20, 0.5, {255, 255, 100, 255})          // Yellow donut
+        //r.draw_hollow_rect({0, 20}, 0, {60, 60}, 0.1, {255, 100, 255, 255})  // Pink hollow rect
 
-        full_uv := r.UV_Rect{
-            min = {0, 0},
-            max = {1, 1}
+
+
+        for tile in bg_tiles {
+            r.draw_rect(
+                position = tile.position.xy,
+                rotation = 0,
+                size     = {32, 32},
+                color    = tile.color
+            )
         }
+        
+        for &s in shapes {
+            
+            if f > 2000 {
+                s.kind = rand.uint_range(0, 6)
+                s.ratio = rand.float32_range(0, 1)
+                s.vel   = random_unit_vector2() * rand.float32_range(70, 150)
+                s.color = {u8(rand.uint32_range(0, 255)), u8(rand.uint32_range(0, 255)), u8(rand.uint32_range(0, 255)), 255}
+                s.position = {0, 0, 0}
+                s.current = s.delay
+            }
 
-        for x in -5..=5 {
-            for y in -5..=5 {                
-                r.draw_rect(
-                    position = {f32(x) * 64 , f32(y) * 64},
-                    rotation = 0,
-                    size     = {64, 64},
-                    color    = {255, 255, 255, 255}
-                )
-                // r.draw_batched(sprite_batch, r.Draw_Batched{
-                //     texture  = bg_tex_id,
-                //     position = {f32(x) * 64 , f32(y) * 64, 0},
-                //     rotation = {0, 0, 0},
-                //     uv_rect  = full_uv,
-                //     scale    = {64, 64, 1},
-                //     color    = {255, 255, 255, 255},
-                // })
+            s.current -=  ns_to_f32(p.get_deltatime_ns())
+            if s.current > 0 {
+                continue
+            }
+
+            s.position.xy += ns_to_f32(p.get_deltatime_ns()) * s.vel
+            s.rotation.z += ns_to_f32(p.get_deltatime_ns()) * s.ratio * 1.3
+            switch s.kind {
+                case 0:
+                    r.draw_rect(
+                        position = s.position.xy,
+                        rotation = s.rotation.z,
+                        size     = {32, 32},
+                        color    = s.color
+                    )
+                case 1:
+                    r.draw_circle(
+                        position = s.position.xy,
+                        radius = 16,
+                        color = s.color
+                    )
+                case 2:
+                    r.draw_donut(
+                        position = s.position.xy,
+                        radius = 16,
+                        inner_radius_ratio = s.ratio,
+                        color = s.color
+                    )
+                case 3:
+                    r.draw_triangle(
+                        position = s.position.xy,
+                        rotation = s.rotation.z,
+                        size = 32,
+                        color = s.color
+                    )
+                case 4:
+                    r.draw_hollow_rect(
+                        position = s.position.xy,
+                        rotation = s.rotation.z,
+                        size = {32, 32},
+                        thickness = s.ratio,
+                        color = s.color
+                    )
+                case 5:
+                    r.draw_hollow_triangle(
+                        position = s.position.xy,
+                        rotation = s.rotation.z,
+                        size = 32,
+                        thickness = s.ratio,
+                        color = s.color
+                    )
+
             }
         }
 
-        // 352 × 176
-        terrain_block_uv := r.UV_Rect {
-            min = {(12 * 16) / 352.0, 16 / 176.0},
-            max = {(13 * 16) / 352.0, 32 / 176.0}
+        if f > 2000 {
+            f = 0
         }
 
-        // for x in -6..=6 {
-        //     r.draw_batched(sprite_batch, r.Draw_Batched{
-        //         texture  = terrain_tex_id,
-        //         position = {64 * f32(x), -64 * 6, 0},
-        //         rotation = {0, 0, 0},
-        //         uv_rect  = terrain_block_uv,
-        //         scale    = {64, 64, 1},
-        //         color    = {255, 255, 255, 255},
-        //     })
+        // p.set_window_title(0, fmt.tprintf("FPS: %.2f", 1 / ns_to_f32(p.get_deltatime_ns())) )
+     
 
-        //     r.draw_batched(sprite_batch, r.Draw_Batched{
-        //         texture  = terrain_tex_id,
-        //         position = {64 * f32(x), 64 * 6, 0},
-        //         rotation = {0, 0, 0},
-        //         uv_rect  = terrain_block_uv,
-        //         scale    = {64, 64, 1},
-        //         color    = {255, 255, 255, 255},
-        //     })
-        // }
-
-        // for y in -6..=6 {
-        //     r.draw_batched(sprite_batch, r.Draw_Batched{
-        //         texture  = terrain_tex_id,
-        //         position = {-64 * 6, 64 * f32(y), 0},
-        //         rotation = {0, 0, 0},
-        //         uv_rect  = terrain_block_uv,
-        //         scale    = {64, 64, 1},
-        //         color    = {255, 255, 255, 255},
-        //     })
-
-        //     r.draw_batched(sprite_batch, r.Draw_Batched{
-        //         texture  = terrain_tex_id,
-        //         position = {64 * 6, 64 * f32(y), 0},
-        //         rotation = {0, 0, 0},
-        //         uv_rect  = terrain_block_uv,
-        //         scale    = {64, 64, 1},
-        //         color    = {255, 255, 255, 255},
-        //     })
-        // }
-
-        // r.draw_batched(sprite_batch, r.Draw_Batched{
-        //     texture  = enemy_tex_id,
-        //     position = rock.position,
-        //     rotation = rock.rotation,
-        //     uv_rect  = full_uv,
-        //     scale    = rock.scale,
-        //     color    = {255, 255, 255, 255},
-        // })
-
-        // r.draw_batched(sprite_batch, r.Draw_Batched{
-        //     texture  = dude_tex_id,
-        //     position = player.position,
-        //     uv_rect  = full_uv,
-        //     scale    = player.scale,
-        //     color    = {255, 255, 255, 255},
-        // })
-        r.flush_shapes_batch()
-        
-        
+        r.flush_shapes_batch()        
         r.cmd_end_frame({r_id})
         r.present()
         
         f += 1
-
-        if lost {
-            p.set_window_opacity(window_id, opacity)
-            opacity -= ns_to_f32(p.get_deltatime_ns()) * 0.6
-            if opacity <= 0 {
-                p.application_request_shutdown()
-            }
-        }
     }
 
     p.cleanup()
@@ -352,15 +276,30 @@ ns_to_f32 :: proc(t: i64) -> f32 {
 }
 
 update_camera :: proc(camera: ^r.Camera) {
-    movement_speed: f32 = 400
+    camera_ms: f32 = 450
+    if p.input_key_is_held(.A) {
+        camera.position.x -= ns_to_f32(p.get_deltatime_ns()) * camera_ms
+    }
+    if p.input_key_is_held(.D) {
+        camera.position.x += ns_to_f32(p.get_deltatime_ns()) * camera_ms
+    }
 
+    if p.input_key_is_held(.W) {
+        camera.position.y += ns_to_f32(p.get_deltatime_ns()) * camera_ms
+    }
+    if p.input_key_is_held(.S) {
+        camera.position.y -= ns_to_f32(p.get_deltatime_ns()) * camera_ms
+    }
 
+    zoom_speed: f32 = 500
     if p.input_key_is_held(.Q) {
-        camera.zoom += ns_to_f32(p.get_deltatime_ns()) * 300
+        camera.zoom += ns_to_f32(p.get_deltatime_ns()) * zoom_speed
     }
     if p.input_key_is_held(.E) {
-        camera.zoom -= ns_to_f32(p.get_deltatime_ns()) * 300
+        camera.zoom -= ns_to_f32(p.get_deltatime_ns()) * zoom_speed
     }
+
+    camera.aspect_ratio = f32(p.get_window_size(0).x) / f32(p.get_window_size(0).y)
     
 }
 
