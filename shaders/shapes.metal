@@ -8,6 +8,8 @@ using namespace metal;
 
 struct Shape_Uniforms {
     float4x4 view_projection;
+    float2 size;
+    float pixel;
 };
 
 struct Shape_Vertex {
@@ -33,8 +35,10 @@ struct Shape_Instance {
 
 struct Shape_Out {
     float4 position [[position]];
-    float2 uv;           // normalized UV [0,1] for SDF calculations
-    float2 tex_uv;       // remapped UV for texture sampling
+    float2 uv;              // normalized UV [0,1] for SDF calculations
+    float2 tex_uv;          // remapped UV for texture sampling
+    float2 uv_min;       // raw uv_min for shapes that need it (e.g., line)
+
     float4 color;
     uint kind;
     float4 params;
@@ -48,6 +52,7 @@ constant uint SHAPE_TRIANGLE        = 3;
 constant uint SHAPE_HOLLOW_RECT     = 4;
 constant uint SHAPE_HOLLOW_TRIANGLE = 5;
 constant uint SHAPE_TEXTURED_RECT   = 6;
+constant uint SHAPE_LINE            = 7;
 
 vertex Shape_Out shape_vertex(
     Shape_Vertex             vert      [[stage_in]],
@@ -58,19 +63,21 @@ vertex Shape_Out shape_vertex(
     Shape_Out out;
     Shape_Instance inst = instances[instID];
 
-    // rotation
+    // scale first, then rotation
+    float2 scaled = vert.position * inst.scale;
+    
     float c = cos(inst.rotation);
     float s = sin(inst.rotation);
     float2 rotated = float2(
-        vert.position.x * c - vert.position.y * s,
-        vert.position.x * s + vert.position.y * c
+        scaled.x * c - scaled.y * s,
+        scaled.x * s + scaled.y * c
     );
 
-    // scale + translation
-    float2 world_pos = rotated * inst.scale + inst.position;
+    // translation
+    float2 world_pos = rotated + inst.position;
 
     out.position = uniforms.view_projection * float4(world_pos, 0.0, 1.0);
-    
+        
     // Keep normalized UV for SDF calculations
     out.uv = vert.uv;
     out.uv.y = 1.0 - out.uv.y;
@@ -80,10 +87,12 @@ vertex Shape_Out shape_vertex(
     out.tex_uv = mix(inst.uv_min, inst.uv_max, vert.uv);
     out.tex_uv.y = 1.0 - out.tex_uv.y;  // flip Y for texture coordinates
     
-    out.color         = float4(inst.color) / 255.0;
-    out.kind          = inst.kind;
-    out.params        = inst.params;
-    out.texture_index = inst.texture_index;
+    out.uv_min        = inst.uv_min;
+
+    out.color           = float4(inst.color) / 255.0;
+    out.kind            = inst.kind;
+    out.params          = inst.params;
+    out.texture_index   = inst.texture_index;
 
     return out;
 }
@@ -108,6 +117,34 @@ float sdf_box(float2 p, float2 b) {
     return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
 }
 
+// SDF for line segment with round caps
+// p: point to test
+// a: start point of line segment
+// b: end point of line segment
+// Returns distance to the line segment (not including radius)
+float sdf_line_segment(float2 p, float2 a, float2 b) {
+    float2 pa = p - a;
+    float2 ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h);
+}
+
+// Pixel-perfect UV sampling (Klems technique)
+// Keeps pixels crisp at boundaries while allowing smooth subpixel positioning
+float2 uv_klems(float2 uv, int2 texture_size) {
+    float2 tex_size = float2(texture_size.x, texture_size.y);
+    float2 pixels = uv * tex_size + 0.5;
+    
+    // tweak fractional value of the texture coordinate
+    float2 fl = floor(pixels);
+    float2 fr = fract(pixels);
+    float2 aa = fwidth(pixels) * 0.75;
+
+    fr = smoothstep(float2(0.5) - aa, float2(0.5) + aa, fr);
+    
+    return (fl + fr - 0.5) / tex_size;
+}
+
 // Argument buffer structure for bindless textures
 struct TextureArray {
     array<texture2d<float>, MAX_SHAPE_TEXTURES> textures;
@@ -124,7 +161,7 @@ fragment float4 shape_fragment(
     float aa = fwidth(dist);
 
     if (in.kind == SHAPE_CIRCLE) {
-        float alpha = 1.0 - smoothstep(0.5 - aa, 0.5, dist);
+        float alpha = 1.0 - smoothstep(0.5 - aa, 0.5 + aa, dist);
         color.a *= alpha;
     }
     else if (in.kind == SHAPE_DONUT) {
@@ -148,7 +185,7 @@ fragment float4 shape_fragment(
         float thickness = in.params.x * 0.5;
         float d_outer = sdf_box(centered, float2(0.5));
         float d_inner = sdf_box(centered, float2(0.5 - thickness));
-        
+
         float alpha_outer = 1.0 - smoothstep(-aa, aa, d_outer);
         float alpha_inner = smoothstep(-aa, aa, d_inner);
         
@@ -159,15 +196,51 @@ fragment float4 shape_fragment(
         float thickness = in.params.x * 0.4;
         float d_outer = sdf_triangle(centered, 0.4);
         float d_inner = sdf_triangle(centered, 0.4 - thickness);
-        
+
         float alpha_outer = 1.0 - smoothstep(-aa, aa, d_outer);
         float alpha_inner = smoothstep(-aa, aa, d_inner);
         
         color.a *= alpha_outer * alpha_inner;
     }
+    else if (in.kind == SHAPE_LINE) {
+        // Line using SDF for pixelated rendering with round caps
+        // params.xy = normalized start point
+        // params.zw = normalized end point
+        // uv_min.x = thickness ratio (half_thickness / box_height)
+        // uv_min.y = aspect ratio (box_width / box_height)
+        
+        float2 line_start = float2(in.params.x, -in.params.y);  // flip Y to match UV flip
+        float2 line_end = float2(in.params.z, -in.params.w);    // flip Y to match UV flip
+        float thickness_ratio = in.uv_min.x;
+        float aspect = in.uv_min.y;
+        
+        // Adjust centered coords for aspect ratio to get correct distances
+        float2 p = centered;
+        p.x *= aspect;  // Scale x to match aspect ratio
+        
+        float2 a = line_start;
+        a.x *= aspect;
+        
+        float2 b = line_end;
+        b.x *= aspect;
+        
+        // Calculate distance to line segment
+        float d = sdf_line_segment(p, a, b);
+        
+        // thickness_ratio is in the normalized space, adjust for aspect
+        float radius = thickness_ratio;
+        
+        float aa_line = fwidth(d);
+        float alpha = 1.0 - smoothstep(radius - aa_line, radius + aa_line, d);
+        color.a *= alpha;
+    }
+
     // SHAPE_RECT and SHAPE_TEXTURED_RECT: no SDF masking, just use texture
 
     // Sample from the bindless texture array using the instance's texture index
-    float4 texColor = textureArray.textures[in.texture_index].sample(textureSampler, in.tex_uv);
+    float2 tex_uv = in.tex_uv;
+    texture2d<float> tex = textureArray.textures[in.texture_index];
+    float2 klem_uv = uv_klems(tex_uv, int2(tex.get_width(), tex.get_height()));
+    float4 texColor = tex.sample(textureSampler, klem_uv);
     return texColor * color;
 }
